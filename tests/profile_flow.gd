@@ -114,12 +114,13 @@ func _run() -> void:
 	player = main._player
 	var crate: Node = main.get_children().filter(func(c): return c.is_in_group("lootable"))[0]
 	player.global_position = crate.global_position + Vector3(20, 0, 0)
+	var before: Dictionary = player.inventory.totals()
 	_check(not main.raid.request_loot(crate), "loot: a crate 20 m away must be refused")
-	_check(player.inventory.totals().is_empty(), "loot: a refused request must not change the backpack")
+	_check(player.inventory.totals() == before, "loot: a refused request must not change the backpack")
 	player.global_position = crate.global_position
 	_check(main.raid.request_loot(crate), "loot: a crate within reach must be accepted")
 	player.inventory.clear()
-	player.inventory.add("ammo", 10)
+	player.inventory.add("ammo", main.raid.brought["ammo"] + 10)  # the unspent starting kit does not count as loot
 	player.inventory.add("repair_kit", 1)
 	player.take_damage(1000)
 	_check(results.size() == 1 and results[0]["outcome"] == "dead", "death: expected a dead result")

@@ -18,6 +18,11 @@ const MAP_MAX_SIDE := 100.0
 # Minimum clear walking space (m) kept between placed objects and between objects and the outer wall.
 const PATH_GAP := 3.0
 
+# Ammo the player starts every raid with. Deliberately tight: the pistol uses 1 per
+# shot, so 12 is twelve shots. Spent before any ammo found in crates, and never counts
+# as loot: only ammo beyond this amount can be kept on extract.
+const STARTING_AMMO := 12
+
 # Seconds the player must stand inside the extract zone. Leaving resets the timer.
 const EXTRACT_HOLD_SECONDS := 8.0
 # Metres from the player to a crate for a loot request to be accepted.

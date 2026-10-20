@@ -21,8 +21,8 @@ var safe := false  # true inside a shelter: enemies cannot see or hurt the playe
 var inventory_open := false
 var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
+var weapon_id := "pistol"
 var weapon: Dictionary = WeaponData.DATA["pistol"]
-var _cooldown := 0.0
 var _step_dist := 0.0  # metres walked since the last footstep sound
 var _head: Node3D
 var _cam: Camera3D
@@ -81,10 +81,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_open else Input.MOUSE_MODE_CAPTURED
 			inventory_toggled.emit(inventory_open)
 		elif event.keycode == KEY_1:
-			weapon = WeaponData.DATA["pistol"]
+			select_weapon("pistol")
 			Sfx.play("switch")
 		elif event.keycode == KEY_2:
-			weapon = WeaponData.DATA["scattergun"]
+			select_weapon("scattergun")
 			Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
@@ -112,16 +112,23 @@ func _physics_process(delta: float) -> void:
 			_step_dist = 0.0
 			Sfx.play("step_player")
 
-	_cooldown -= delta
-	if _cooldown <= 0.0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		_cooldown = weapon["cooldown"]
-		_shoot()
+		raid.request_fire(weapon_id, _cam.global_transform)  # the raid checks cooldown and ammo
 	_update_aim()
 
+func select_weapon(id: String) -> void:
+	weapon_id = id
+	weapon = WeaponData.DATA[id]
+
+func ammo_count() -> int:
+	return inventory.count(weapon["ammo_item"])
+
 func weapon_text() -> String:
-	return "%s  %dx%d dmg  full to %dm, falls off to %dm  [1/2 switch]" % [
-		weapon["name"], weapon["damage"], weapon["pellets"], weapon["effective"], weapon["max"]]
+	var ammo := ammo_count()
+	return "%s  AMMO %d (uses %d)%s  %dx%d dmg  full to %dm, falls off to %dm  [1/2 switch]" % [
+		weapon["name"], ammo, weapon["ammo_per_shot"], "  [NO AMMO]" if ammo < weapon["ammo_per_shot"] else "",
+		weapon["damage"], weapon["pellets"], weapon["effective"], weapon["max"]]
 
 func _cast(dist: float) -> Dictionary:
 	return _cast_dir(-_cam.global_transform.basis.z, dist)
@@ -131,21 +138,6 @@ func _cast_dir(dir: Vector3, dist: float) -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(from, from + dir * dist)
 	query.exclude = [get_rid()]
 	return get_world_3d().direct_space_state.intersect_ray(query)
-
-func _shoot() -> void:
-	Sfx.play(weapon["sound"])
-	var from := _cam.global_position
-	var cb := _cam.global_transform.basis
-	var spread: float = weapon["spread"]
-	for i in int(weapon["pellets"]):
-		var dir := -cb.z
-		if spread > 0.0:
-			dir = (dir + cb.x * randf_range(-spread, spread) + cb.y * randf_range(-spread, spread)).normalized()
-		var hit := _cast_dir(dir, weapon["max"])
-		if hit and hit["collider"].has_method("take_damage"):
-			var dmg := WeaponData.damage_at(weapon, from.distance_to(hit["position"]))
-			if hit["collider"].take_damage(dmg):
-				kills += 1
 
 # Aim line: green out to the weapon's effective range, orange through the falloff
 # zone, with a dot where the aim ray lands (green = full damage, orange = reduced).

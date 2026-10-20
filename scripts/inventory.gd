@@ -26,6 +26,24 @@ func add(id: String, qty: int) -> int:
 	changed.emit()
 	return qty
 
+func count(id: String) -> int:
+	return totals().get(id, 0)
+
+# Removes qty of an item (from the last slots first). Returns false, changing nothing, if there is less than qty.
+func remove(id: String, qty: int) -> bool:
+	if count(id) < qty:
+		return false
+	for i in range(SLOTS - 1, -1, -1):
+		var s = slots[i]
+		if qty > 0 and s != null and s["id"] == id:
+			var n := mini(qty, s["qty"])
+			s["qty"] -= n
+			qty -= n
+			if s["qty"] <= 0:
+				slots[i] = null
+	changed.emit()
+	return true
+
 func take_one(i: int) -> void:
 	slots[i]["qty"] -= 1
 	if slots[i]["qty"] <= 0:

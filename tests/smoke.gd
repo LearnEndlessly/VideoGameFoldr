@@ -19,8 +19,8 @@ func _init() -> void:
 	player.health = 50
 	for i in player.inventory.slots.size():
 		player.use_slot(i)
-	player.weapon = player.WeaponData.DATA["scattergun"]
-	player._shoot()
+	player.select_weapon("scattergun")
+	main.raid.request_fire(player.weapon_id, player._cam.global_transform)
 	for e in get_nodes_in_group("pack_0"):
 		e.take_damage(10)
 	player.inventory_toggled.emit(true)
