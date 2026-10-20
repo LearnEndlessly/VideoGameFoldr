@@ -16,5 +16,6 @@ Thumbs.db
 .DS_Store
 *.tmp
 
-# Raw Kenney downloads kept for reference (only files copied into assets/ are used)
-kenney_*/
+# Raw Kenney downloads kept for reference (only the models copied into assets/weapons, props and buildings are used)
+/kenney_*/
+/assets/kenney_*/

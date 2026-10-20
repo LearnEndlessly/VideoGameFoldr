@@ -39,8 +39,21 @@ func _held(player) -> Node:
 			return c
 	return null
 
+func _fitted_check() -> void:
+	var size := Vector3(4.0, 3.0, 0.5)
+	var f := Model.load_fitted("res://assets/buildings/kenney_prototype_kit/wall.glb", size, Color(0.5, 0.4, 0.3))
+	_check(f != null, "a Prototype Kit wall should load")
+	if f != null:
+		var box := Model._bounds(f, Transform3D.IDENTITY)
+		_check(box.size.is_equal_approx(size) and box.get_center().is_equal_approx(Vector3.ZERO), "a fitted model should fill its box exactly and sit centred, got %s at %s" % [box.size, box.get_center()])
+		f.free()
+	_check(Model.load_fitted("res://assets/nope.glb", size) == null, "a missing model falls back to the box")
+	for path in ["res://assets/weapons/kenney_blaster_kit/blaster-e.glb", "res://assets/weapons/kenney_blaster_kit/scope-large-a.glb", "res://assets/props/kenney_blaster_kit/crate-medium.glb", "res://assets/props/kenney_prototype_kit/crate.glb", "res://assets/buildings/kenney_prototype_kit/floor-thick.glb"]:
+		_check(ResourceLoader.exists(path), "%s should be organized under assets/" % path)
+
 func _init() -> void:
 	await process_frame
+	_fitted_check()
 	# The loader.
 	_check(Model.load_scene("") == null, "an empty path must give no model")
 	_check(Model.load_scene("res://assets/does_not_exist.glb") == null, "a missing file must give no model, not an error")

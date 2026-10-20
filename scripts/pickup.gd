@@ -4,6 +4,7 @@ extends Area3D
 
 const Loot = preload("res://data/loot.gd")
 const Attachments = preload("res://data/attachments.gd")
+const Model = preload("res://scripts/model.gd")
 
 var id := "ammo"
 var qty := 1
@@ -26,6 +27,12 @@ func _ready() -> void:
 	add_child(mesh)
 	if Attachments.DATA.has(id):  # super rare: bigger, and named so it is not missed
 		bm.size = Vector3(0.5, 0.5, 0.5)
+		var art := Model.load_scene(Attachments.DATA[id].get("model", ""))
+		if art != null:  # the real part (a scope, a silencer, a magazine) instead of the cube
+			mesh.visible = false
+			art.scale = Vector3.ONE * 2.5
+			art.position.y = 0.5
+			add_child(art)
 		var label := Label3D.new()
 		label.text = Attachments.DATA[id]["name"].to_upper()
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

@@ -30,8 +30,8 @@ func _frames(n: int) -> void:
 	for i in n:
 		await physics_frame
 
-func _raid(equipped: String) -> Node:
-	var p := Profile.new(PATH)
+func _raid(equipped: String, with_profile = null) -> Node:
+	var p: Profile = with_profile if with_profile != null else Profile.new(PATH)
 	p.equipped = equipped
 	p.save()
 	Main.show_start = false
@@ -106,6 +106,25 @@ func _run() -> void:
 	player.zoom_input_test = false
 	main.queue_free()
 	await process_frame
+
+	# A Scope attachment zooms any weapon twice as far and gives it the scope view; broken, it does nothing.
+	var kit := Profile.new(PATH)
+	kit.add_items({"att_scope": 1})
+	kit.attach("pistol", "att_scope")
+	main = await _raid("pistol", kit)
+	player = main._player
+	player.set_physics_process(true)
+	player.zoom_input_test = true
+	await _frames(20)
+	_check(is_equal_approx(player._cam.fov, float(WeaponData.DATA["pistol"]["zoom_fov"]) * 0.5) and player.scoped and main._scope.shown, "a Scope should zoom the pistol twice as far, through the scope view, fov %s" % player._cam.fov)
+	main.raid.att_left["att_scope"] = 0  # broken
+	main.raid.weapon_changed()
+	await _frames(20)
+	_check(is_equal_approx(player._cam.fov, float(WeaponData.DATA["pistol"]["zoom_fov"])) and not player.scoped, "a broken Scope does nothing")
+	player.zoom_input_test = false
+	main.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(PATH)
 
 	# The Ammo Depot offers every weapon, and the choice is saved.
 	DirAccess.remove_absolute(PATH)

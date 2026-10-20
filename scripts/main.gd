@@ -24,7 +24,12 @@ const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const PauseMenu = preload("res://scripts/pause_menu.gd")
 const Scope = preload("res://scripts/scope.gd")
 const Tracer = preload("res://scripts/tracer.gd")
+const Model = preload("res://scripts/model.gd")
 const Difficulty = preload("res://data/difficulty.gd")
+
+# Kenney Prototype Kit pieces (assets/) the map is built from. Collision stays the plain box; these are the looks.
+const WALL_MODEL := "res://assets/buildings/kenney_prototype_kit/wall.glb"
+const FLOOR_MODEL := "res://assets/buildings/kenney_prototype_kit/floor-thick.glb"
 
 const EXTRACT_ZONES := {
 	"A": {"name": "Safe route", "color": Color(0, 1, 0.2, 0.25)},
@@ -127,10 +132,10 @@ func _build_map() -> void:
 	_roll_map_size()
 	_gap = rng.randf_range(Tuning.PATH_GAP_RANGE[0], Tuning.PATH_GAP_RANGE[1])
 	var wall_color := Color(0.4, 0.4, 0.45)
-	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
+	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3), FLOOR_MODEL)
 	for s in [-1, 1]:
-		_add_box(Vector3(half_w * 2.0 + 2.0, 4, 1), Vector3(0, 2, s * (half_d + 0.5)), wall_color)
-		_add_box(Vector3(1, 4, half_d * 2.0 + 2.0), Vector3(s * (half_w + 0.5), 2, 0), wall_color)
+		_add_box(Vector3(half_w * 2.0 + 2.0, 4, 1), Vector3(0, 2, s * (half_d + 0.5)), wall_color, WALL_MODEL)
+		_add_box(Vector3(1, 4, half_d * 2.0 + 2.0), Vector3(s * (half_w + 0.5), 2, 0), wall_color, WALL_MODEL)
 
 	# Order matters: the big fixed things go in first (they may overlap if the map is too
 	# small), then shelters with their screening cover, then general cover fills whatever
@@ -772,7 +777,7 @@ func _place_cover(at = null, mix := {}) -> void:
 	if p == null:
 		return
 	_cover.append(p)
-	_add_box(size, p + Vector3(0, size.y / 2.0, 0), t["color"])
+	_add_box(size, p + Vector3(0, size.y / 2.0, 0), t["color"], t.get("model", ""))
 
 # Safe nooks: small, coloured like the cover, door facing a random way, with cover pieces
 # placed in front of the door so they are hard to spot from the open. They are placed
@@ -904,7 +909,7 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 			var mid: float = (seg[0] + seg[1]) / 2.0
 			var size := Vector3(length, height, thick) if side < 2 else Vector3(thick, height, length)
 			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
-			_add_box(size, pos, color)
+			_add_box(size, pos, color, WALL_MODEL)
 
 # Looks only, no collision and not in `blocks` or `solids` (so the walk grid and the base map ignore them): a
 # roof, a band of trim under it (a lintel over each doorway), and what says what the building is. The armory
@@ -912,7 +917,7 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 # is white with green trim, a red cross on its walls and a big red cross standing on the roof.
 func _dress_building(center: Vector3, size: float, height: float, zone: Dictionary, doors: Array) -> void:
 	var roof_y := height + 0.175
-	_deco(Vector3(size + 0.8, 0.35, size + 0.8), center + Vector3(0, roof_y, 0), zone["roof_color"])
+	_deco(Vector3(size + 0.8, 0.35, size + 0.8), center + Vector3(0, roof_y, 0), zone["roof_color"], FLOOR_MODEL)
 	for side in 4:
 		var n := _side_normal(side)
 		var wall_pos := center + n * (size / 2.0 + 0.04)
@@ -939,7 +944,13 @@ func _dress_building(center: Vector3, size: float, height: float, zone: Dictiona
 			for sz in [-1, 1]:
 				_deco(Vector3(0.9, 0.6, 0.9), center + Vector3(sx, 0, sz) * (size / 2.0 + 0.2) + Vector3(0, height + 0.35 + 0.3, 0), zone["roof_color"])
 
-func _deco(size: Vector3, pos: Vector3, color: Color) -> void:
+func _deco(size: Vector3, pos: Vector3, color: Color, model := "") -> void:
+	if model != "":
+		var fitted := Model.load_fitted(model, size, color)
+		if fitted != null:
+			fitted.position = pos
+			add_child(fitted)
+			return
 	var mesh := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = size
@@ -1167,7 +1178,7 @@ func _make_extract_zone(id: String, pos: Vector3) -> void:
 	extract_zones.append({"id": id, "name": def["name"], "pos": pos, "color": def["color"], "area": area,
 		"beam": mesh, "label": label, "mat": mat, "hold": hold})
 
-func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
+func _add_box(size: Vector3, pos: Vector3, color: Color, model_path := "") -> void:
 	blocks.append([size, pos, color])
 	if pos.y > 0.0:  # everything above the floor blocks walking
 		solids.append(Rect2(Vector2(pos.x - size.x / 2.0, pos.z - size.z / 2.0), Vector2(size.x, size.z)))
@@ -1178,12 +1189,16 @@ func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
 	shape.size = size
 	col.shape = shape
 	body.add_child(col)
-	var mesh := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mesh.mesh = bm
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mesh.material_override = mat
-	body.add_child(mesh)
+	var fitted := Model.load_fitted(model_path, size, color) if model_path != "" else null
+	if fitted != null:  # the art; collision above is still the plain box
+		body.add_child(fitted)
+	else:
+		var mesh := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = size
+		mesh.mesh = bm
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		mesh.material_override = mat
+		body.add_child(mesh)
 	add_child(body)

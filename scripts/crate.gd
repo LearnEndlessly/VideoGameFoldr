@@ -1,6 +1,9 @@
 extends StaticBody3D
 
 const Loot = preload("res://data/loot.gd")
+const Model = preload("res://scripts/model.gd")
+
+const MODEL := "res://assets/props/kenney_blaster_kit/crate-medium.glb"  # Kenney Blaster Kit
 
 # Each crate rolls from its own seed, so contents don't depend on open order.
 var seed_value := 0
@@ -12,12 +15,17 @@ var color := Color(0.9, 0.7, 0.1)
 var contents: Array = []  # [[id, qty], ...] still inside; rolled on first take
 var _rolled := false
 var _mat := StandardMaterial3D.new()
+var _art: Node3D  # the crate model, if it loaded
 
 func _ready() -> void:
 	add_to_group("lootable")
 	var shape := CollisionShape3D.new()
 	shape.shape = BoxShape3D.new()
 	add_child(shape)
+	_art = Model.load_fitted(MODEL, Vector3.ONE, color)
+	if _art != null:
+		add_child(_art)
+		return
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = BoxMesh.new()
 	_mat.albedo_color = color
@@ -45,4 +53,6 @@ func take_into(inventory) -> Dictionary:
 	contents = left
 	if left.is_empty():
 		_mat.albedo_color = Color(0.3, 0.3, 0.3)
+		if _art != null:
+			Model.tint_all(_art, Color(0.3, 0.3, 0.3))
 	return taken

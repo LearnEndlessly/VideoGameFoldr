@@ -159,6 +159,10 @@ func _att(weapon_id: String) -> Dictionary:
 	var id := _attachment_id(weapon_id)
 	return Attachments.DATA[id] if id != "" else {}
 
+# What the weapon's working attachment does to its zoom: 1.0 with none, 0.5 for a Scope.
+func zoom_mult(weapon_id: String) -> float:
+	return float(_att(weapon_id).get("zoom", 1.0))
+
 # The player changed weapon: its attachment changes the reload time.
 func weapon_changed() -> void:
 	if _player != null:

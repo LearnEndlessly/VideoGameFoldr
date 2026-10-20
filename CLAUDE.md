@@ -14,4 +14,4 @@ Read README.md (brief, architecture, tests); current state and phase notes are i
 - Map generation is seeded; changing generation call order changes every old seed.
 - Run tests via the `godot-test` skill; screenshots via `godot-capture`; tuning via `balance-pass`.
 - Never open raw telemetry/log files; use `tools/summarize_telemetry.gd`.
-- `kenney_*/` are raw asset downloads, ignore them; used files live in `assets/`.
+- `assets/kenney_*/` are raw asset downloads, ignore them; the organized models live in `assets/weapons`, `assets/props` and `assets/buildings` (see `assets/README.md`).

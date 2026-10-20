@@ -264,9 +264,10 @@ func _update_reload_anim() -> void:
 func _update_zoom(delta: float) -> void:
 	zooming = raid != null and not inventory_open and (zoom_input_test or (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 		and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)))
-	var target: float = float(weapon.get("zoom_fov", BASE_FOV)) if zooming else BASE_FOV
+	var zoom_mult: float = raid.zoom_mult(weapon_id) if raid != null else 1.0  # a Scope attachment
+	var target: float = float(weapon.get("zoom_fov", BASE_FOV)) * zoom_mult if zooming else BASE_FOV
 	_cam.fov = move_toward(_cam.fov, target, ZOOM_FOV_SPEED * delta)
-	scoped = zooming and bool(weapon.get("scope", false)) and _cam.fov < BASE_FOV * 0.5
+	scoped = zooming and (bool(weapon.get("scope", false)) or zoom_mult < 1.0) and _cam.fov < BASE_FOV * 0.5
 	if _viewmodel != null:
 		_viewmodel.visible = not scoped
 
