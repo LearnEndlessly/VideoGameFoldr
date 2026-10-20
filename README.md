@@ -23,7 +23,9 @@ Target loop: **Hub** (build, skill tree, stash) -> **Raid** (small bounded proce
 - **Inventory:** 12 slots, stackable, drawn symbols per item (gear, bullet, cross, diamond), click to use, right-click to drop. Crates keep what does not fit.
 - **Enemies:** 5 groups of 3-4. Types: grunt and brute. 25% chance of a modifier (armored = 2x health, fast = 1.5x speed). Groups patrol an area, turn yellow when they notice you or are shot (the whole group alerts), and give up after 4 s out of reach. A health bar sits above each one (blue frame = armored).
 - **Shelters:** open-fronted blue huts. Standing inside makes you invisible to enemies and they lose track of you.
-- **Run end:** reaching the green zone, or dying, reloads a new random map and shows the last result.
+- **Run end:** reaching the green zone, or dying, reloads a new random map and shows the last result. (Phase 2 replaces this with a hold-to-extract timer, results screens, and a saved profile.)
+- **Spawn safety:** enemy groups never spawn within `ENEMY_GROUP_MIN_ORIGIN` (15 m) of the player's start. Fixed in Phase 1; see below.
+- **Version control:** git, branch `main`.
 
 ## Known gaps (not built)
 Stash, save/load, and extraction keeping loot; weapon durability and repair; ammo consumption (ammo exists as an item but nothing uses it); a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); audio; animation; art; settings or menus; export builds.
@@ -34,17 +36,26 @@ Stash, save/load, and extraction keeping loot; weapon durability and repair; amm
 - **Content is data:** `data/loot.gd` (items), `data/enemies.gd` (types and modifiers), `data/weapons.gd` (weapons and falloff), `data/rng.gd` (weighted pick). Add a new item, enemy, or weapon by adding a table row.
 - Scripts reference each other with `preload()` constants, **not** `class_name`, because `class_name` failed to resolve on a fresh project in headless runs.
 - Randomness is seeded for generation; patrol movement and pellet spread use unseeded global randomness.
-- **No version control.** The folder is not a git repo yet.
+- **Tunable numbers** go in `data/*.gd`. `data/tuning.gd` holds the spawn values so far; many older numbers are still constants inside scripts (map size, counts, enemy sight/reach, player speed) and will move there as those systems are touched.
+- Changing map generation changes what every old seed produces (the Phase 1 fix did this).
 
 ## Tests
+Run each with `Godot --headless --path <project> -s tests/<name>.gd`. Always run them with output redirected to a file; a script error inside a test can leave the process hanging.
 ```
-Godot --headless --path <project> -s tests/check.gd    # RNG determinism, loot weights, inventory, damage falloff
-Godot --headless --path <project> -s tests/smoke.gd    # opens crates, uses items, shoots, alerts a pack
+check.gd         # RNG determinism, loot weights, inventory, damage falloff
+smoke.gd         # opens crates, uses items, shoots, alerts a pack
+spawn_safety.gd  # 60 maps: no enemy group near the player's start; 20 maps: no damage in the first 2 s. Exit code 1 on failure.
 ```
+
+## Phase 1 report: the "lost 30 HP in 2 seconds" bug
+- **Root cause:** `_free_spot()` in `scripts/main.gd` places objects by trying random spots. By the time enemy groups are placed, 38+ cover blocks, crates, and shelters already fill the map, so all 50 tries fail. The old fallback then kept the *last random sample* even when it landed inside the 15 m no-spawn zone around the player's start. Groups ended up 3-10 m from the player and attacked within seconds.
+- **Not the cause:** enemy hit range (every hit was at 1.8 m or less, one per second per enemy), damage falloff (that is for player weapons only), or double-applied damage (no frame had two hits from one enemy).
+- **Fix:** the spawn-distance limit is now never relaxed; only overlap with other objects is accepted after `SPAWN_TRIES` valid samples.
+- **Still true:** because the map is saturated, enemy groups (and some other objects) still spawn overlapping cover or each other. That is a layout-density problem, not fixed here. Cover blocks use large exclusion radii (up to about 4 m each) and 25 of them fill most of the 60x60 area.
 
 ## What a game developer needs to weigh in usefully
 - **Feel and balance have not been playtested by the builder** (Claude wrote this without seeing a screen). Movement speed, enemy damage, weapon ranges, spawn density, and shelter size are first guesses.
-- One unexplained smoke-test result: the player lost about 30 HP in a 2-second headless run when enemies should have been out of reach.
+- Enemy groups spawning on top of cover (map density), see the Phase 1 report below.
 - **Open design questions:** how the skill-tree stats are named and what they change; how repair works and what scrap is for; what the secondary ability is; whether enemies drop loot; how large a "small" map should be before open-world streaming is needed.
 - **Scale risk:** a large 3D open-world FPS needs chunk streaming, navigation meshes, LOD, and likely C# or GDExtension for performance. None of that exists; the current world is one flat scene.
 - **Art/audio pipeline:** nothing decided. Everything is colored boxes and capsules.

@@ -4,6 +4,7 @@ const Player = preload("res://scripts/player.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Crate = preload("res://scripts/crate.gd")
 const Enemies = preload("res://data/enemies.gd")
+const Tuning = preload("res://data/tuning.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
 
@@ -16,6 +17,7 @@ const GROUP_COUNT := 5  # enemy groups, 3-4 members each
 static var last_result := ""
 
 var rng := RandomNumberGenerator.new()
+var seed_override := -1  # tests set this before add_child to pick a map
 var _seed := 0
 var _taken: Array = []  # [position, radius] of everything placed, to avoid overlaps
 var _player: Player
@@ -26,7 +28,7 @@ var _ended := false
 func _ready() -> void:
 	# Pass a seed after `--` on the command line to replay a map.
 	var args := OS.get_cmdline_user_args()
-	_seed = int(args[0]) if args.size() > 0 else randi()
+	_seed = seed_override if seed_override >= 0 else (int(args[0]) if args.size() > 0 else randi())
 	rng.seed = _seed
 
 	_add_box(Vector3(60, 1, 60), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
@@ -47,13 +49,14 @@ func _ready() -> void:
 		c.position = _free_spot(1.5, 3.0) + Vector3(0, 0.5, 0)
 		add_child(c)
 	for g in GROUP_COUNT:
-		var center := _free_spot(4.0, 15.0)
+		var center := _free_spot(4.0, Tuning.ENEMY_GROUP_MIN_ORIGIN)
 		for i in rng.randi_range(3, 4):
 			var e := Enemy.new()
 			e.stats = Enemies.roll(rng)
 			e.home = center
 			e.group_id = g
-			e.position = center + Vector3(rng.randf_range(-2, 2), 0, rng.randf_range(-2, 2))
+			var spread: float = Tuning.GROUP_SPREAD
+			e.position = center + Vector3(rng.randf_range(-spread, spread), 0, rng.randf_range(-spread, spread))
 			add_child(e)
 
 	var sun := DirectionalLight3D.new()
@@ -153,23 +156,29 @@ func _on_extract(body: Node3D) -> void:
 	if body == _player:
 		_end("EXTRACTED")
 
-# shortcut: after 50 failed tries the last spot is used even if it overlaps;
-# fine at this density, revisit if the map gets crowded.
+# Picks a spot clear of everything placed so far. The map is crowded by the time
+# enemies are placed, so after SPAWN_TRIES valid samples overlap is accepted, but
+# min_origin (distance from the player's start) is never relaxed.
+# shortcut: gives up after 1000 samples, so a min_origin near the map size could
+# still return a spot inside it; upgrade if min_origin is ever tuned that high.
 func _free_spot(radius: float, min_origin: float) -> Vector3:
 	var p := Vector3.ZERO
-	for i in 50:
+	var tries := 0
+	for i in 1000:
 		p = Vector3(rng.randf_range(-26, 26), 0, rng.randf_range(-26, 26))
 		if p.length() < min_origin:
 			continue
-		var clear := true
-		for t in _taken:
-			if p.distance_to(t[0]) < t[1] + radius:
-				clear = false
-				break
-		if clear:
+		tries += 1
+		if tries >= Tuning.SPAWN_TRIES or _is_clear(p, radius):
 			break
 	_taken.append([p, radius])
 	return p
+
+func _is_clear(p: Vector3, radius: float) -> bool:
+	for t in _taken:
+		if p.distance_to(t[0]) < t[1] + radius:
+			return false
+	return true
 
 func _place_extract() -> void:
 	var side := -1.0 if rng.randf() < 0.5 else 1.0
