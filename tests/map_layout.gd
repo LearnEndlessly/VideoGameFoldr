@@ -19,6 +19,7 @@ func _init() -> void:
 	Main.show_start = false
 	var wide := 0
 	var tall := 0
+	var covers: Array = []
 	for s in SEEDS:
 		var main = load("res://main.tscn").instantiate()
 		main.seed_override = s
@@ -32,16 +33,25 @@ func _init() -> void:
 			wide += 1
 		if d > w * 1.3:
 			tall += 1
+		covers.append(main._cover.size())
 		_check_structures(s, main)
 		_check_walkable(s, main)
 		main.queue_free()
 		await process_frame
 	if wide < 5 or tall < 5:
 		failures.append("map shapes lack variety: %d wide and %d tall out of %d" % [wide, tall, SEEDS])
+	covers.sort()
+	if covers[-1] - covers[0] < 12:
+		failures.append("cover count lacks variety: %d to %d pieces over %d maps" % [covers[0], covers[-1], SEEDS])
 	for f in failures:
 		printerr(f)
 	print("map_layout: %d failure(s) over %d maps (%d wide, %d tall)" % [failures.size(), SEEDS, wide, tall])
 	quit(1 if failures.size() > 0 else 0)
+
+# Every loot building has a second doorway straight across from the first.
+func _check_two_doors(s: int, st: Dictionary) -> void:
+	if not st["door2"].is_equal_approx(st["center"] * 2.0 - st["door"]):
+		_fail(s, "%s's second door is not opposite the first" % st["id"])
 
 func _fail(map_seed: int, message: String) -> void:
 	if failures.size() < 25:
@@ -49,6 +59,8 @@ func _fail(map_seed: int, message: String) -> void:
 
 func _check_structures(s: int, main) -> void:
 	var ids: Array = main.structures.map(func(x): return x["id"])
+	for st in main.structures:
+		_check_two_doors(s, st)
 	ids.sort()
 	var expected: Array = LootZones.DATA.keys()
 	expected.sort()
@@ -122,6 +134,8 @@ func _check_walkable(s: int, main) -> void:
 		var inward: Vector3 = (st["center"] - st["door"]).normalized()  # a crate can sit at the centre, so aim just inside the door
 		targets["%s door" % st["id"]] = st["door"]
 		targets["%s just inside" % st["id"]] = st["door"] + inward * 1.0
+		targets["%s second door" % st["id"]] = st["door2"]
+		targets["%s just inside the second door" % st["id"]] = st["door2"] - inward * 1.0
 	for i in main.shelters.size():
 		targets["shelter %d" % i] = main.shelters[i]
 	var homes := {}

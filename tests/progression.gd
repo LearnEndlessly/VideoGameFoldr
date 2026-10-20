@@ -93,6 +93,7 @@ func _run() -> void:
 	_check(is_equal_approx(raid.reward_mult, base_mult + 2 * Tuning.DEPTH_REWARD_BONUS), "the reward should grow with depth")
 	_check(main._player.inventory.count("medkit") == 3 and raid._loot().get("medkit", 0) == 3, "carried loot should be in the backpack and count as loot again")
 	_check(Main.carry.is_empty(), "the carry is handed over once")
+	_check(main._cross.mouse_filter == Control.MOUSE_FILTER_IGNORE and main._ammo_bar.mouse_filter == Control.MOUSE_FILTER_IGNORE and main._tick.mouse_filter == Control.MOUSE_FILTER_IGNORE, "HUD drawings must not eat clicks meant for the backpack")
 	raid.profile.save()
 	var extras: Array = main._spawners.slice(base_bases)
 	var zones: Array = main.extract_zones

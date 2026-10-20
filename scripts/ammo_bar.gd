@@ -9,6 +9,9 @@ const GAP := 2.0
 var total := 0
 var filled := 0
 
+func _init() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE  # a HUD drawing must never eat clicks meant for the backpack
+
 func _process(_d: float) -> void:
 	custom_minimum_size = Vector2(total * (SLOT_W + GAP), SLOT_H)
 	queue_redraw()

@@ -9,6 +9,9 @@ var radius := 110.0
 var shown := false
 var color := Color(1, 0.75, 0.1)
 
+func _init() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE  # a HUD drawing must never eat clicks meant for the backpack
+
 func _process(_d: float) -> void:
 	queue_redraw()
 

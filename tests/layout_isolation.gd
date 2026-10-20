@@ -4,7 +4,8 @@
 # work. tests/fixtures/layout_golden.json was written from the build that had a single extract zone, with
 # the extract positions left out. The test checks the current build against it, and that changing the
 # extract tuning (Main.extract_cfg) moves the zones without touching anything else.
-# After an INTENDED change to the rest of generation, regenerate with `-- --write`.
+# After an INTENDED change to the rest of generation, regenerate with `-- --write` (with VG_PROFILE pointing at a scratch
+# profile). It was regenerated when cover variety and the two-door buildings went in, so it no longer predates the extract work.
 extends SceneTree
 
 const Main = preload("res://scripts/main.gd")

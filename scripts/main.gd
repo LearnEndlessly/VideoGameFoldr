@@ -26,7 +26,6 @@ const EXTRACT_ZONES := {
 	"A": {"name": "Safe route", "color": Color(0, 1, 0.2, 0.25)},
 	"B": {"name": "Fast route", "color": Color(1, 0.6, 0.1, 0.25)},
 }
-const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
 
 # True: build the base (scripts/hub.gd) instead of a raid. The game opens there, and extracting or dying
@@ -63,6 +62,7 @@ var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
 var _seed := 0
 var _last_tick := -1  # whole second of the extract timer last ticked
+var _gap := 3.0  # this map's minimum walkable gap between objects, rolled per map (Tuning.PATH_GAP_RANGE)
 var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep walkable gaps
 var _cover: Array = []  # centres of placed cover boxes
 var _guard_pos = null  # Vector3 home of the group guarding Tuning.GUARDED_ZONE, or null
@@ -106,6 +106,7 @@ func _build_hub() -> void:
 # enemy bases, shelters and cover. Needs no scene tree, so preview() can run it.
 func _build_map() -> void:
 	_roll_map_size()
+	_gap = rng.randf_range(Tuning.PATH_GAP_RANGE[0], Tuning.PATH_GAP_RANGE[1])
 	var wall_color := Color(0.4, 0.4, 0.45)
 	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
 	for s in [-1, 1]:
@@ -133,8 +134,11 @@ func _build_map() -> void:
 	for i in Tuning.SPAWNER_COUNT:
 		_place_spawner(i)
 	_place_shelters()
-	for i in COVER_ATTEMPTS:
-		_place_cover()
+	var mix := {}  # this map's own cover mix: each type's weight scaled by a random factor
+	for k in Scenery.COVER_TYPES:
+		mix[k] = maxi(1, int(round(float(Scenery.COVER_TYPES[k]["weight"]) * 10.0 * rng.randf_range(Tuning.COVER_MIX_RANGE[0], Tuning.COVER_MIX_RANGE[1]))))
+	for i in rng.randi_range(Tuning.COVER_ATTEMPTS_MIN, Tuning.COVER_ATTEMPTS_MAX):  # boxes that don't fit with a walkable gap are skipped
+		_place_cover(null, mix)
 	_place_extracts()  # last, and from its own RNG stream: nothing above depends on it
 
 func _build_raid() -> void:
@@ -245,6 +249,7 @@ func _build_raid() -> void:
 	_tick.radius = Tuning.THREAT_TICK_RADIUS
 	layer.add_child(_tick)
 	_tick.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	layer.move_child(ui, -1)  # the backpack draws over every other HUD piece
 	add_child(layer)
 
 func _build_extract_hud(layer: CanvasLayer) -> void:
@@ -282,6 +287,7 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	top.position = Vector2(16, 16)
 
 	var ammo := VBoxContainer.new()
+	ammo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ammo_bar = AmmoBar.new()
 	_ammo_label = Label.new()
 	_ammo_label.add_theme_font_size_override("font_size", 14)
@@ -585,14 +591,14 @@ func _roll_map_size() -> void:
 
 # A random point where a footprint of half-size (hx, hz) stays PATH_GAP away from the outer wall.
 func _random_point(hx: float, hz: float) -> Vector3:
-	var rx := maxf(half_w - hx - Tuning.PATH_GAP, 0.0)
-	var rz := maxf(half_d - hz - Tuning.PATH_GAP, 0.0)
+	var rx := maxf(half_w - hx - _gap, 0.0)
+	var rz := maxf(half_d - hz - _gap, 0.0)
 	return Vector3(rng.randf_range(-rx, rx), 0, rng.randf_range(-rz, rz))
 
 # True if a footprint centred at p keeps PATH_GAP of walkable space from everything placed.
 func _is_clear(p: Vector3, hx: float, hz: float) -> bool:
 	for t in _taken:
-		if absf(p.x - t[0].x) < t[1] + hx + Tuning.PATH_GAP and absf(p.z - t[0].z) < t[2] + hz + Tuning.PATH_GAP:
+		if absf(p.x - t[0].x) < t[1] + hx + _gap and absf(p.z - t[0].z) < t[2] + hz + _gap:
 			return false
 	return true
 
@@ -621,7 +627,7 @@ func _free_spot(hx: float, hz: float, min_origin: float, overlap_ok := true):
 	return p
 
 func _inside_map(p: Vector3, half: float) -> bool:
-	return absf(p.x) <= half_w - half - Tuning.PATH_GAP and absf(p.z) <= half_d - half - Tuning.PATH_GAP
+	return absf(p.x) <= half_w - half - _gap and absf(p.z) <= half_d - half - _gap
 
 # Every spot GUARD_DISTANCE to GUARD_DISTANCE + 4 m from the door on `side` of the loot area
 # at `center`, within 70 degrees of straight out from the door, that is clear, inside the map
@@ -640,8 +646,8 @@ func _guard_spots(center: Vector3, size: float, side: int) -> Array:
 
 # Rolls a cover box and places it: at a random clear spot, or exactly at `at` if given
 # and clear. Skipped (nothing placed) when it doesn't fit with a walkable gap.
-func _place_cover(at = null) -> void:
-	var type := Rng.pick(Scenery.COVER_TYPES, rng)
+func _place_cover(at = null, mix := {}) -> void:
+	var type := Rng.pick(mix if not mix.is_empty() else Scenery.COVER_TYPES, rng)
 	var t: Dictionary = Scenery.COVER_TYPES[type]
 	var xr: Array = t["x"]
 	var yr: Array = t["y"]
@@ -654,7 +660,7 @@ func _place_cover(at = null) -> void:
 	var p = null
 	if at == null:
 		p = _free_spot(hx, hz, 6.0, false)
-	elif absf(at.x) <= half_w - hx - Tuning.PATH_GAP and absf(at.z) <= half_d - hz - Tuning.PATH_GAP \
+	elif absf(at.x) <= half_w - hx - _gap and absf(at.z) <= half_d - hz - _gap \
 			and at.length() >= 6.0 and _is_clear(at, hx, hz):
 		p = at
 		_taken.append([p, hx, hz])
@@ -718,7 +724,10 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 			if _side_normal(s).dot(center.normalized()) < 0.0:
 				door_sides.append(s)
 		door_side = door_sides[rng.randi_range(0, door_sides.size() - 1)] if not door_sides.is_empty() else rng.randi_range(0, 3)
-	_add_room(center, size, door_side, float(zone["door"]), 2.8, 0.5, zone["wall_color"])
+	var door2_side := door_side ^ 1  # sides 0/1 and 2/3 are opposite walls: a second doorway straight across
+	var height: float = zone["height"]
+	_add_room(center, size, door_side, float(zone["door"]), height, 0.5, zone["wall_color"], door2_side)
+	_dress_building(center, size, height, zone, [door_side, door2_side])
 	var floor_mark := MeshInstance3D.new()
 	var fm := BoxMesh.new()
 	fm.size = Vector3(size - 1.0, 0.02, size - 1.0)
@@ -732,7 +741,7 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 	label.text = zone["name"]
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.font_size = 64
-	label.position = center + Vector3(0, 4.5, 0)
+	label.position = center + Vector3(0, height + 3.0, 0)
 	add_child(label)
 
 	# Crates: against the inside walls (never the door's wall) and apart from each other, so the middle
@@ -740,6 +749,7 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 	var door_point := center + _side_normal(door_side) * (size / 2.0)
 	var edge := size / 2.0 - 1.05
 	var entry := center + _side_normal(door_side) * (size / 2.0 - 1.0) + Vector3(0, 0.5, 0)  # 1 m inside the doorway
+	var entry2 := center + _side_normal(door2_side) * (size / 2.0 - 1.0) + Vector3(0, 0.5, 0)
 	var spots: Array = []
 	var crate_range: Array = zone["crates"]
 	for round in 10:  # a first crate can leave no room for the next one in a small room: start over
@@ -747,11 +757,11 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 		for i in rng.randi_range(crate_range[0], crate_range[1]):
 			for attempt in 40:
 				var side := rng.randi_range(0, 3)
-				if side == door_side:
+				if side == door_side or side == door2_side:
 					continue
 				var along := Vector3(1, 0, 0) if side < 2 else Vector3(0, 0, 1)
 				var p := center + _side_normal(side) * edge + along * rng.randf_range(-edge, edge) + Vector3(0, 0.5, 0)
-				if p.distance_to(entry) < 1.6:  # keep the way in clear
+				if p.distance_to(entry) < 1.3 or p.distance_to(entry2) < 1.3:  # keep the ways in clear
 					continue
 				if spots.all(func(s): return p.distance_to(s) >= 1.2):
 					spots.append(p)
@@ -768,7 +778,7 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 		c.color = zone["crate_color"]
 		c.position = p
 		add_child(c)
-	structures.append({"id": id, "center": center, "size": size, "door": door_point,
+	structures.append({"id": id, "center": center, "size": size, "door": door_point, "door2": center + _side_normal(door2_side) * (size / 2.0),
 		"rect": Rect2(Vector2(center.x - size / 2.0, center.z - size / 2.0), Vector2(size, size))})
 
 # Sides: 0 = +z, 1 = -z, 2 = +x, 3 = -x.
@@ -777,12 +787,12 @@ func _side_normal(side: int) -> Vector3:
 
 # Four walls around a square with a doorway cut into one side (door_side -1 = no door).
 func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
-		height: float, thick: float, color: Color) -> void:
+		height: float, thick: float, color: Color, door2_side := -1) -> void:
 	for side in 4:
 		var n := _side_normal(side)
 		var along := Vector3(1, 0, 0) if side < 2 else Vector3(0, 0, 1)
 		var segments := [[-outer / 2.0, outer / 2.0]]
-		if side == door_side:
+		if side == door_side or side == door2_side:
 			segments = [[-outer / 2.0, -door_w / 2.0], [door_w / 2.0, outer / 2.0]]
 		for seg in segments:
 			var length: float = seg[1] - seg[0]
@@ -790,6 +800,50 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 			var size := Vector3(length, height, thick) if side < 2 else Vector3(thick, height, length)
 			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
 			_add_box(size, pos, color)
+
+# Looks only, no collision and not in `blocks` or `solids` (so the walk grid and the map pit ignore them): a
+# roof, a band of trim under it (a lintel over each doorway), and what says what the building is. The armory
+# is olive with yellow trim, corner merlons on the roof and rows of rounds painted on its walls; the med post
+# is white with green trim, a red cross on its walls and a big red cross standing on the roof.
+func _dress_building(center: Vector3, size: float, height: float, zone: Dictionary, doors: Array) -> void:
+	var roof_y := height + 0.175
+	_deco(Vector3(size + 0.8, 0.35, size + 0.8), center + Vector3(0, roof_y, 0), zone["roof_color"])
+	for side in 4:
+		var n := _side_normal(side)
+		var wall_pos := center + n * (size / 2.0 + 0.04)
+		_deco(Vector3(size + 0.1, 0.45, 0.1) if side < 2 else Vector3(0.1, 0.45, size + 0.1), wall_pos + Vector3(0, height - 0.5, 0), zone["trim_color"])
+		if side in doors:
+			continue  # the doorway is in the middle of this wall
+		var face := wall_pos + n * 0.02 + Vector3(0, height * 0.5, 0)
+		var thin := 0.08
+		if zone["style"] == "medical":
+			var red := Color(0.85, 0.12, 0.12)
+			_deco(Vector3(0.5, 1.6, thin) if side < 2 else Vector3(thin, 1.6, 0.5), face, red)
+			_deco(Vector3(1.6, 0.5, thin) if side < 2 else Vector3(thin, 0.5, 1.6), face, red)
+		else:
+			for k in [-0.7, 0.0, 0.7]:  # three rounds: brass body, copper tip
+				var off := Vector3(k, 0, 0) if side < 2 else Vector3(0, 0, k)
+				_deco(Vector3(0.4, 1.3, thin) if side < 2 else Vector3(thin, 1.3, 0.4), face + off - Vector3(0, 0.2, 0), zone["trim_color"])
+				_deco(Vector3(0.4, 0.35, thin) if side < 2 else Vector3(thin, 0.35, 0.4), face + off + Vector3(0, 0.62, 0), Color(0.75, 0.4, 0.15))
+	if zone["style"] == "medical":
+		var up := Vector3(0, height + 0.35 + 1.1, 0)
+		for dims in [Vector3(0.6, 2.2, 0.6), Vector3(2.2, 0.6, 0.6), Vector3(0.6, 0.6, 2.2)]:
+			_deco(dims, center + up, Color(0.85, 0.12, 0.12))
+	else:
+		for sx in [-1, 1]:
+			for sz in [-1, 1]:
+				_deco(Vector3(0.9, 0.6, 0.9), center + Vector3(sx, 0, sz) * (size / 2.0 + 0.2) + Vector3(0, height + 0.35 + 0.3, 0), zone["roof_color"])
+
+func _deco(size: Vector3, pos: Vector3, color: Color) -> void:
+	var mesh := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mesh.mesh = bm
+	mesh.position = pos
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mesh.material_override = mat
+	add_child(mesh)
 
 # The old single extract zone sat at one end of the map's long axis. The zones are now placed by
 # _place_extracts, but this still makes the same two draws from the map's rng and keeps the same footprint

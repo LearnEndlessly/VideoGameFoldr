@@ -49,7 +49,13 @@ const MAP_ASPECT_MAX := 2.0
 const MAP_MIN_SIDE := 44.0
 const MAP_MAX_SIDE := 100.0
 # Minimum clear walking space (m) kept between placed objects and between objects and the outer wall.
-const PATH_GAP := 3.0
+# Cover per map varies: each map tries a random number of cover boxes between these (cover that does not fit
+# is skipped), and each cover type's chance is scaled by a random factor in COVER_MIX_RANGE, so some maps
+# are sparse and open, some cramped, some mostly pillars, some mostly long walls.
+const COVER_ATTEMPTS_MIN := 8
+const COVER_ATTEMPTS_MAX := 80
+const COVER_MIX_RANGE := [0.2, 2.0]
+const PATH_GAP_RANGE := [2.7, 4.0]  # this map's minimum walkable gap between objects (m): tight maps pack more cover
 
 # Ammo the player starts every raid with. Deliberately tight: the pistol uses 1 per
 # shot, so 12 is twelve shots. Spent before any ammo found in crates, and never counts
@@ -115,7 +121,7 @@ const EXTRACT_BEAM_ALWAYS_VISIBLE := false
 # Placement draws from the extract stream: up to EXTRACT_PLACE_TRIES points per zone, and if no pair
 # works the whole pair is redrawn up to EXTRACT_PAIR_RETRIES times. Then it logs an error and falls back.
 const EXTRACT_PLACE_TRIES := 300
-const EXTRACT_PAIR_RETRIES := 5
+const EXTRACT_PAIR_RETRIES := 25
 # Going deeper: after an extract the player may descend instead of going home. The loot just extracted
 # comes along, at risk again, on a fresh map (new crates, so loot is reset). Each level below the first adds:
 #   DEPTH_EXTRA_SPAWNERS more enemy bases (at most DEPTH_MAX_EXTRA_SPAWNERS extra), placed from their own stream
