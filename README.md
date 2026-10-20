@@ -53,6 +53,7 @@ spawn_safety.gd  # 60 maps: no enemy group near the player's start; 20 maps: no 
 map_layout.gd    # 40 maps: shapes vary, 3 loot areas, crates only inside them, and every key place is walkable from the start. Exit code 1 on failure.
 rebalance.gd     # the design changes below: repair kits never drop, crafting, line of sight and sprint noise, guarded armory, backpack size. Exit code 1 on failure.
 telemetry.gd     # event log in a scratch folder: map on the first line, samples, crate events, runs.jsonl, the 100-file cache cap, naming grammar, enabled flag. Exit code 1 on failure.
+models.gd        # optional art: model paths replace the placeholder shapes, missing files fall back, alert tint, weapon model. Exit code 1 on failure.
 profile_unit.gd  # profile save/load round trip, overwrite, corrupt-file recovery. Exit code 1 on failure.
 ammo_threat.gd   # ammo cost, cooldown, empty weapon, starting-kit rule, group count, threat clock (continuous, wave, control). Exit code 1 on failure.
 profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps nothing, leaving the zone resets the timer,
@@ -113,6 +114,9 @@ Not done, on purpose: merging cover shapes (low confidence), a second ammo type,
 - When you add a mechanic: log it with `Telemetry.emit("player.verb.object", {...})` where the simulation applies it, add new tuning constants to `Telemetry.tuning()`, add new map facts to `Main._map_info()`, and bump `GAME_VERSION`. Gaps: no pos/zone/hp on every line (samples cover that), and the `threat` alert cause is never emitted.
 
 **Assumptions to check when playtesting:** (1) 8 slots and the 120 s clock are guesses from simulation, not play; (2) sprint noise at 14 m and sight at 18 m are first values; (3) one medkit per 10 scrap may make healing too cheap or too dear; (4) the guarded armory, sprint noise and line of sight together may make the first minute much harder, so look at damage per kill and time to first alert first.
+
+## Art assets
+Everything is still placeholder shapes, but the hooks for real art exist and nothing is downloaded yet. Enemy types (`data/enemies.gd`) and weapons (`data/weapons.gd`) have an optional `"model"` path to a `.glb`/`.gltf`/`.tscn` (plus an optional `"model_scale"`); an empty or missing path keeps the capsule or shows no weapon, so missing art never breaks the game. An enemy model replaces the capsule and turns the alert colour when the group is alerted; a weapon model is held at the lower right of the view. Put files under `assets/` (see `assets/README.md`) and record each one's source and license in `CREDITS.md`. Suggested free sources: Kenney (CC0, confirmed), Quaternius and Poly Pizza (check each license), all low-poly and glTF friendly. Untested with a real asset so far: only a fixture scene in `tests/fixtures/` has been loaded.
 
 ## Project skills (for Claude Code sessions, in `.claude/skills/`)
 - `godot-test`: runs the whole headless suite (or named tests) and prints a PASS/FAIL table; handles the path quoting, timeouts and hangs that break hand-run tests.

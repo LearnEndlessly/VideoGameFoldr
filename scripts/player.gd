@@ -4,6 +4,7 @@ const Inventory = preload("res://scripts/inventory.gd")
 const Loot = preload("res://data/loot.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Recipes = preload("res://data/recipes.gd")
+const Model = preload("res://scripts/model.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
@@ -23,6 +24,7 @@ var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
 var weapon_id := "pistol"
 var weapon: Dictionary = WeaponData.DATA["pistol"]
+var _viewmodel: Node3D  # the current weapon's art model, if it has one
 var _step_dist := 0.0  # metres walked since the last footstep sound
 var _head: Node3D
 var _cam: Camera3D
@@ -41,6 +43,7 @@ func _ready() -> void:
 	add_child(_head)
 	_cam = Camera3D.new()
 	_head.add_child(_cam)
+	_show_viewmodel()
 	var line := BoxMesh.new()
 	line.size = Vector3(0.012, 0.012, 1)
 	_beam_near = _make_mesh(line, Color(0.2, 1, 0.3))
@@ -136,6 +139,22 @@ func _physics_process(delta: float) -> void:
 func select_weapon(id: String) -> void:
 	weapon_id = id
 	weapon = WeaponData.DATA[id]
+	_show_viewmodel()
+
+# The weapon's optional art model (its "model" field in data/weapons.gd), held at the lower
+# right of the view. Without one nothing is shown, as before.
+func _show_viewmodel() -> void:
+	if _viewmodel != null:
+		_viewmodel.queue_free()
+		_viewmodel = null
+	var model := Model.load_scene(weapon.get("model", ""))
+	if model == null:
+		return
+	model.name = "Viewmodel"
+	model.position = Vector3(0.22, -0.2, -0.5)
+	model.scale = Vector3.ONE * float(weapon.get("model_scale", 1.0))
+	_cam.add_child(model)
+	_viewmodel = model
 
 func ammo_count() -> int:
 	return inventory.count(weapon["ammo_item"])

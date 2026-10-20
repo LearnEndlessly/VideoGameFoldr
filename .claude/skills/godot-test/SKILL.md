@@ -45,6 +45,7 @@ If the script warns that the real telemetry folder changed, a test wrote to the 
 | ammo_threat | ammo, cooldown, starting-kit rule, group count, threat clock modes |
 | rebalance | repair kits never drop, crafting, line of sight and sprint noise, guarded armory |
 | telemetry | event log, map snapshot, samples, runs.jsonl, the 100-file cache cap |
+| models | optional art: model paths replace placeholders, missing files fall back, alert tint, weapon model |
 
 ## Adding or changing a test
 

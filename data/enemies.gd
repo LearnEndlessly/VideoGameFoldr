@@ -1,8 +1,11 @@
 const Rng = preload("res://data/rng.gd")
 
+# Art: "model" is an optional path to a .glb/.gltf/.tscn (e.g. "res://assets/enemies/grunt.glb")
+# that replaces the placeholder capsule; "" keeps the capsule. Add "model_scale" (default 1.0)
+# to correct a model's size; it is multiplied by "size". Models should have their origin at their feet.
 const TYPES := {
-	"grunt": {"weight": 75, "health": 50, "speed": 3.0, "damage": 10, "size": 1.0, "color": Color.RED},
-	"brute": {"weight": 25, "health": 150, "speed": 2.0, "damage": 25, "size": 1.4, "color": Color.PURPLE},
+	"grunt": {"weight": 75, "health": 50, "speed": 3.0, "damage": 10, "size": 1.0, "color": Color.RED, "model": ""},
+	"brute": {"weight": 25, "health": 150, "speed": 2.0, "damage": 25, "size": 1.4, "color": Color.PURPLE, "model": ""},
 }
 
 const MODIFIER_CHANCE := 0.25

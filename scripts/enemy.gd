@@ -2,6 +2,7 @@ extends CharacterBody3D
 
 const Sfx = preload("res://scripts/sfx.gd")
 const Tuning = preload("res://data/tuning.gd")
+const Model = preload("res://scripts/model.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
 
 const REACH := 1.8
@@ -26,6 +27,7 @@ var _lost_timer := 0.0
 var _repick := 0.0
 var _step_dist := 0.0  # metres walked since the last footstep sound
 var _target := Vector3.ZERO
+var _model_meshes: Array = []  # MeshInstance3D nodes of the art model, if one is used
 var _mat := StandardMaterial3D.new()
 var _label := Label3D.new()
 var _bar := Node3D.new()        # faces the camera each frame
@@ -56,6 +58,14 @@ func _ready() -> void:
 	_mat.emission = ALERT_COLOR
 	mesh.material_override = _mat
 	add_child(mesh)
+	var model := Model.load_scene(stats.get("model", ""))
+	if model != null:  # an art asset replaces the placeholder capsule (kept, hidden)
+		mesh.visible = false
+		model.name = "Model"
+		model.scale = Vector3.ONE * size * float(stats.get("model_scale", 1.0))
+		add_child(model)
+		for m in model.find_children("*", "MeshInstance3D", true, false):
+			_model_meshes.append(m)
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label.position.y = 2.0 * size + 0.6
 	add_child(_label)
@@ -102,6 +112,8 @@ func set_alert(on: bool) -> void:
 		Sfx.play("alert", global_position)
 	_mat.albedo_color = ALERT_COLOR if on else stats["color"]
 	_mat.emission_enabled = on
+	for m in _model_meshes:  # a model keeps its own look until alert, then takes the alert colour
+		m.material_override = _mat if on else null
 	_update_label()
 
 # Threat clock (see raid.gd): head for `target` instead of patrolling, until end_converge().
