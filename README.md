@@ -113,3 +113,10 @@ Not done, on purpose: merging cover shapes (low confidence), a second ammo type,
 - When you add a mechanic: log it with `Telemetry.emit("player.verb.object", {...})` where the simulation applies it, add new tuning constants to `Telemetry.tuning()`, add new map facts to `Main._map_info()`, and bump `GAME_VERSION`. Gaps: no pos/zone/hp on every line (samples cover that), and the `threat` alert cause is never emitted.
 
 **Assumptions to check when playtesting:** (1) 8 slots and the 120 s clock are guesses from simulation, not play; (2) sprint noise at 14 m and sight at 18 m are first values; (3) one medkit per 10 scrap may make healing too cheap or too dear; (4) the guarded armory, sprint noise and line of sight together may make the first minute much harder, so look at damage per kill and time to first alert first.
+
+## Project skills (for Claude Code sessions, in `.claude/skills/`)
+- `godot-test`: runs the whole headless suite (or named tests) and prints a PASS/FAIL table; handles the path quoting, timeouts and hangs that break hand-run tests.
+- `godot-capture`: runs the rendered screenshot tour (`tools/capture.gd`) and reviews the images; the only way Claude can see the game. Clears and caps its own screenshot folder.
+- `balance-pass`: reads `runs.jsonl`, groups raids by build and tuning, proposes specific old-to-new changes tied to measures, applies them on request and records each pass in `docs/BALANCE_LOG.md`.
+- `game-design-researcher`: researches how Arc Raiders, Path of Exile and Minecraft build their systems, translates mechanisms into this framework, and records dated findings in `docs/RESEARCH.md`. Runs broad topics as tiered background subagents.
+
