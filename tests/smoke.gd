@@ -2,14 +2,19 @@
 # Opens every crate and toggles the backpack to exercise paths a plain boot never reaches.
 extends SceneTree
 
+const Main = preload("res://scripts/main.gd")
+
 func _init() -> void:
+	Main.show_start = false
 	var main = load("res://main.tscn").instantiate()
 	root.add_child(main)
 	await process_frame
 	var player = main._player
 	for c in main.get_children():
-		if c.has_method("open"):
-			c.open(player)
+		if c.is_in_group("lootable"):
+			player.global_position = c.global_position
+			assert(main.raid.request_loot(c), "a crate within reach must be lootable")
+	player.global_position = Vector3.ZERO
 	assert(player.inventory.summary() != "nothing", "opening crates must fill the backpack")
 	player.health = 50
 	for i in player.inventory.slots.size():

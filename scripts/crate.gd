@@ -4,11 +4,12 @@ const Loot = preload("res://data/loot.gd")
 
 # Each crate rolls from its own seed, so contents don't depend on open order.
 var seed_value := 0
-var contents: Array = []  # [[id, qty], ...] still inside; rolled on first open
+var contents: Array = []  # [[id, qty], ...] still inside; rolled on first take
 var _rolled := false
 var _mat := StandardMaterial3D.new()
 
 func _ready() -> void:
+	add_to_group("lootable")
 	var shape := CollisionShape3D.new()
 	shape.shape = BoxShape3D.new()
 	add_child(shape)
@@ -18,23 +19,25 @@ func _ready() -> void:
 	mesh.material_override = _mat
 	add_child(mesh)
 
-# Takes what fits in the player's backpack; the rest stays here for a later visit.
-func open(player) -> void:
+# Moves as much as fits into the inventory; the rest stays here for a later visit.
+# Called by the raid simulation after it has validated a loot request.
+# Returns what was taken: {id: qty}.
+func take_into(inventory) -> Dictionary:
 	if not _rolled:
 		_rolled = true
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed_value
 		for i in rng.randi_range(1, 3):
 			contents.append(Loot.roll(rng))
+	var taken := {}
 	var left: Array = []
 	for r in contents:
-		var rem: int = player.inventory.add(r[0], r[1])
+		var rem: int = inventory.add(r[0], r[1])
 		if r[1] > rem:
-			player.picked_up.emit(r[0], r[1] - rem)
+			taken[r[0]] = taken.get(r[0], 0) + r[1] - rem
 		if rem > 0:
 			left.append([r[0], rem])
 	contents = left
 	if left.is_empty():
 		_mat.albedo_color = Color(0.3, 0.3, 0.3)
-	elif _rolled:
-		player.inventory_full.emit()
+	return taken

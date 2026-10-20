@@ -5,8 +5,6 @@ const Loot = preload("res://data/loot.gd")
 const WeaponData = preload("res://data/weapons.gd")
 
 signal died
-signal picked_up(id: String, qty: int)
-signal inventory_full
 signal inventory_toggled(open: bool)
 
 const MAX_HEALTH := 100
@@ -20,6 +18,7 @@ var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var inventory_open := false
 var inventory := Inventory.new()
+var raid  # simulation that validates loot requests; set by main
 var weapon: Dictionary = WeaponData.DATA["pistol"]
 var _cooldown := 0.0
 var _head: Node3D
@@ -82,8 +81,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			weapon = WeaponData.DATA["scattergun"]
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
-			if hit and hit["collider"].has_method("open"):
-				hit["collider"].open(self)
+			if hit and raid != null and hit["collider"].is_in_group("lootable"):
+				raid.request_loot(hit["collider"])
 
 func _physics_process(delta: float) -> void:
 	var dir := Vector3.ZERO

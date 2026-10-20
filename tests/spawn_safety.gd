@@ -4,11 +4,13 @@
 extends SceneTree
 
 const Tuning = preload("res://data/tuning.gd")
+const Main = preload("res://scripts/main.gd")
 const SEEDS := 60      # maps checked for spawn distance
 const SIM_SEEDS := 20  # of those, maps also simulated
 const SIM_FRAMES := 120  # 2 seconds of physics
 
 func _init() -> void:
+	Main.show_start = false
 	var failures: PackedStringArray = []
 	var min_ok: float = Tuning.ENEMY_GROUP_MIN_ORIGIN - Tuning.GROUP_SPREAD * sqrt(2.0)
 	for s in SEEDS:
