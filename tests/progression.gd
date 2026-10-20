@@ -148,6 +148,14 @@ func _run() -> void:
 		shown[r[0]] = r[1]
 	_check(shown == {"RUNS": "4", "EXTRACTED": "3", "KILLED IN ACTION": "1", "SURVIVAL": "75%", "KILLS": "21", "SHOTS FIRED": "80", "ACCURACY": "25%", "DEEPEST LEVEL": "3"}, "the board shows %s" % [shown])
 	_check(hub.find_children("*", "Label3D", true, false).any(func(l): return l.text == "75%"), "the board's numbers should be on the wall")
+	# The map display beyond the map shows the chosen map's numbers.
+	hub.set_seed(5)
+	var info := {}
+	for r in hub.map_info_rows():
+		info[r[0]] = r[1]
+	_check(info.size() == 5 and info["ENEMY BASES"] == str(hub.preview_data["spawners"].size()), "the display should list the map's numbers, got %s" % [info])
+	_check(hub.find_children("*", "Label3D", true, false).any(func(l): return l.text == "MAP 5"), "the display should show the map number")
+	_check(not hub.find_children("*", "Label3D", true, false).any(func(l): return "PIT" in l.text), "no label should say pit")
 	base.queue_free()
 	await process_frame
 	Main.show_start = false

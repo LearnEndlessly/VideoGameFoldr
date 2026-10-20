@@ -34,7 +34,7 @@ const STATIONS := {
 	"stash": {"name": "STASH", "pos": Vector3(0, 0, HALF_D - 1.0), "size": Vector3(2.6, 1.2, 1.0), "color": Color(0.35, 0.45, 0.75)},
 	"armory": {"name": "ARMORY", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
-	"map": {"name": "MAP PIT", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
+	"map": {"name": "MAP", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
 }
 const STATION_TAGLINES := {
 	"raid": "pick your risk and deploy", "stash": "what you brought home", "armory": "choose and sharpen your weapon",
@@ -45,7 +45,7 @@ const MAP_BUTTONS := {
 	"prev": {"label": "<", "name": "Previous map", "x": -0.6, "color": Color(0.8, 0.3, 0.25)},
 	"random": {"label": "?", "name": "Random map", "x": 0.0, "color": Color(0.85, 0.75, 0.2)},
 	"next": {"label": ">", "name": "Next map", "x": 0.6, "color": Color(0.3, 0.75, 0.35)},
-	"play": {"label": "", "name": "Raid terminal: pick the risk and start", "x": 1.4, "color": Color(0.15, 0.7, 0.25)},  # drawn as a play triangle
+	"play": {"label": "", "name": "Raid terminal: pick the risk and start", "x": 0.0, "y": 0.9, "color": Color(0.15, 0.7, 0.25)},  # drawn as a play triangle, above the ? button
 }
 
 var profile  # scripts/profile.gd instance, set by main before add_child
@@ -59,6 +59,9 @@ var open_station := ""  # which station panel is showing, "" if none
 var _prompt: Label
 var _preview: Node3D  # the miniature in the map pit
 var _table_label: Label3D
+var _map_title: Label3D  # the map display
+var _map_values: Array = []
+var _map_captions: Array = []
 var _panel: PanelContainer
 var _head: VBoxContainer  # the open panel's header
 var _content: VBoxContainer
@@ -76,6 +79,7 @@ func _ready() -> void:
 	player.station_used.connect(_on_station_used)
 	player.ui_closed.connect(_hide_panel)
 	_add_scoreboard()
+	_add_map_display()
 	_build_ui()
 	set_seed(randi() % 1000000)
 
@@ -171,11 +175,13 @@ func _add_station(id: String) -> void:
 	var body := _box(size, Vector3(pos.x, float(d.get("y", size.y / 2.0)), pos.z), d["color"])
 	body.add_to_group("station")
 	body.set_meta("station_id", id)
+	if id == "map":
+		return
 	var label := Label3D.new()
 	label.text = d["name"]
 	label.font_size = 48
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position = Vector3(0, 0.9, -0.6) if id == "map" else Vector3(0, size.y / 2.0 + 0.7, 0)  # the map's label floats over the pit, above the buttons
+	label.position = Vector3(0, 1.65, -0.6) if id == "map" else Vector3(0, size.y / 2.0 + 0.7, 0)  # the map's label floats over the pit, above the buttons
 	body.add_child(label)
 	if id == "map":
 		_table_label = label
@@ -184,7 +190,7 @@ func _add_map_buttons() -> void:
 	for id in MAP_BUTTONS:
 		var d: Dictionary = MAP_BUTTONS[id]
 		var side := 0.62 if id == "play" else 0.45
-		var body := _box(Vector3(side, side, 0.06), Vector3(d["x"], 0.3, -0.6), d["color"])
+		var body := _box(Vector3(side, side, 0.06), Vector3(d["x"], d.get("y", 0.3), -0.6), d["color"])
 		body.rotation_degrees.x = -35.0  # leans back so its face points up toward a player looking down at the map
 		body.collision_layer = 2  # shots and E reach it, but the player walks through it
 		body.collision_mask = 0
@@ -229,13 +235,14 @@ func _map_button(action: String) -> void:
 func set_seed(map_seed: int) -> void:
 	selected_seed = maxi(map_seed, 0)
 	if _table_label != null:
-		_table_label.text = "MAP PIT\nmap %d" % selected_seed
+		_table_label.text = "MAP %d" % selected_seed
 	if _preview != null:
 		_preview.queue_free()
 		_preview = null
 	if not preview_fn.is_valid():
 		return
 	preview_data = preview_fn.call(selected_seed)
+	_update_map_display()
 	_preview = _build_miniature(preview_data)
 	add_child(_preview)
 
@@ -279,6 +286,62 @@ func _mini_marker(parent: Node3D, pos: Vector3, radius: float, height: float, co
 	c.bottom_radius = radius
 	c.height = height
 	_mini_mesh(parent, c, Vector3.ONE, pos + Vector3(0, height / 2.0, 0), color)
+
+# --- the map display ---
+
+# What the display shows about the chosen map, as [caption, value] pairs.
+func map_info_rows() -> Array:
+	var d := preview_data
+	if d.is_empty():
+		return []
+	return [["SIZE", "%.0fx%.0f" % [d["w"], d["d"]]], ["LOOT ROOMS", str(d["rooms"])], ["ENEMY BASES", str(d["spawners"].size())],
+		["PATROLS", str(d["groups"].size())], ["COVER", str(d["cover"])]]
+
+# A free-standing screen beyond the map, facing the player: the map number, its numbers and a colour key.
+func _add_map_display() -> void:
+	var z := -3.7
+	var cy := 1.8  # centre height of the screen
+	var accent := Color(0.7, 0.85, 1.0)
+	_box(Vector3(0.2, 1.0, 0.2), Vector3(0, 0.5, z), Color(0.15, 0.17, 0.2))  # the stand
+	_box(Vector3(4.6, 2.0, 0.06), Vector3(0, cy, z), accent)  # the frame
+	_box(Vector3(4.4, 1.8, 0.08), Vector3(0, cy, z + 0.02), Color(0.04, 0.045, 0.06))
+	var zf := z + 0.08
+	_map_title = _display_label("", 0.0, 2.4, zf, 130, accent)
+	_map_title.font = UIKit.bold()
+	for i in 5:
+		_map_values.append(_display_label("", -1.9 + i * 0.95, 1.95, zf, 80, Color.WHITE))
+		_map_values[i].font = UIKit.bold()
+		_map_captions.append(_display_label("", -1.9 + i * 0.95, 1.6, zf, 24, UIKit.DIM))
+	var legend := [["SAFE EXTRACT", Color(0.2, 1, 0.3), -1.75], ["FAST EXTRACT", Color(1, 0.6, 0.1), -0.65], ["ENEMY BASE", Color(1, 0.15, 0.1), 0.5], ["PATROL", Color(1, 0.6, 0.1), 1.65]]
+	for e in legend:
+		var swatch := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.1, 0.1, 0.01)
+		swatch.mesh = bm
+		swatch.position = Vector3(e[2] - 0.4, 1.2, zf)
+		var m := StandardMaterial3D.new()
+		m.albedo_color = e[1]
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		swatch.material_override = m
+		add_child(swatch)
+		_display_label(e[0], e[2] + 0.1, 1.2, zf, 28, UIKit.DIM)
+
+func _display_label(text: String, x: float, y: float, z: float, size: int, color: Color) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font_size = size
+	l.pixel_size = 0.004
+	l.modulate = color
+	l.position = Vector3(x, y, z)
+	add_child(l)
+	return l
+
+func _update_map_display() -> void:
+	_map_title.text = "MAP %d" % selected_seed
+	var rows := map_info_rows()
+	for i in _map_values.size():
+		_map_values[i].text = rows[i][1] if i < rows.size() else ""
+		_map_captions[i].text = rows[i][0] if i < rows.size() else ""
 
 # --- the wall scoreboard ---
 
@@ -330,7 +393,7 @@ func _add_scoreboard() -> void:
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	var hint := UIKit.label("WASD MOVE    E / CLICK USE A STATION    SHOOT THE  < ? >  PANELS TO CHANGE MAP AND  >  TO DEPLOY    ESC CLOSE", 13, UIKit.DIM)
+	var hint := UIKit.label("WASD MOVE    E / CLICK USE A STATION    SHOOT THE  < ? >  PANELS TO CHANGE MAP, THE GREEN PLAY BUTTON TO DEPLOY    ESC CLOSE", 13, UIKit.DIM)
 	hint.position = Vector2(16, 12)
 	layer.add_child(hint)
 	_prompt = UIKit.label("", 24, UIKit.AMBER, true)
@@ -543,24 +606,8 @@ func _fill_character() -> void:
 	sums.add_child(UIKit.tile("reload", "x%.2f" % profile.reload_mult(), a))
 
 func _fill_map() -> void:
-	var a := _accent()
-	var d := preview_data
 	_row().add_child(UIKit.label("MAP %d" % selected_seed, 44, UIKit.AMBER, true))
-	var tiles := _row()
-	tiles.add_child(UIKit.tile("size", "%.0fx%.0f" % [d["w"], d["d"]], a))
-	tiles.add_child(UIKit.tile("loot rooms", str(d["rooms"]), a))
-	tiles.add_child(UIKit.tile("enemy bases", str(d["spawners"].size()), UIKit.BAD))
-	tiles.add_child(UIKit.tile("patrols", str(d["groups"].size()), a))
-	tiles.add_child(UIKit.tile("cover", str(d["cover"]), a))
-	var legend := _row(null, 18)
-	for entry in [["SAFE EXTRACT", Color(0.2, 1, 0.3)], ["FAST EXTRACT", Color(1, 0.6, 0.1)], ["ENEMY BASE", Color(1, 0.15, 0.1)], ["PATROL", Color(1, 0.6, 0.1)]]:
-		var key := _row(legend, 6)
-		var swatch := ColorRect.new()
-		swatch.color = entry[1]
-		swatch.custom_minimum_size = Vector2(14, 14)
-		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		key.add_child(swatch)
-		key.add_child(UIKit.label(entry[0], 12, UIKit.DIM))
+	_label("Its size, loot rooms, enemy bases, patrols and cover are on the display in front of you.", 13, UIKit.DIM)
 	var row := _row()
 	_button(row, "< PREVIOUS", _step_seed.bind(-1), selected_seed <= 0)
 	_button(row, "NEXT >", _step_seed.bind(1))
@@ -591,7 +638,7 @@ func _fill_raid() -> void:
 	var a := _accent()
 	var mult: float = profile.reward_mult()
 	var tiles := _row()
-	tiles.add_child(UIKit.tile("map (change at the pit)", str(selected_seed), a))
+	tiles.add_child(UIKit.tile("map (change it at the map)", str(selected_seed), a))
 	tiles.add_child(UIKit.tile("starting weapon", str(WeaponData.DATA[profile.equipped]["name"]).to_upper(), a))
 	tiles.add_child(UIKit.tile("reward", "x%.2f" % mult, UIKit.GOOD if mult > 1.0 else (UIKit.BAD if mult < 1.0 else UIKit.TEXT)))
 	_label("RISK DIAL  -  harder options pay more loot and more attribute points; easier ones pay less", 12, UIKit.DIM)

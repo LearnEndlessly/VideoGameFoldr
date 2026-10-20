@@ -875,7 +875,7 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
 			_add_box(size, pos, color)
 
-# Looks only, no collision and not in `blocks` or `solids` (so the walk grid and the map pit ignore them): a
+# Looks only, no collision and not in `blocks` or `solids` (so the walk grid and the base map ignore them): a
 # roof, a band of trim under it (a lintel over each doorway), and what says what the building is. The armory
 # is olive with yellow trim, corner merlons on the roof and rows of rounds painted on its walls; the med post
 # is white with green trim, a red cross on its walls and a big red cross standing on the roof.
