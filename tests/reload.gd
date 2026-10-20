@@ -42,12 +42,13 @@ func _run() -> void:
 	player.inventory.add("ammo", 30)  # 42 in the backpack, 12 loaded
 	_check(raid.loaded_rounds("pistol") == Tuning.STARTING_AMMO, "pickup must not refill the magazine")
 
+	raid.loaded["pistol"] = 4  # a part-empty magazine, so the fill can be seen part way
 	_check(raid.request_reload(), "reload with spare ammo should start")
 	_check(not raid.request_reload(), "a second reload while reloading must be refused")
-	await _frames(20)
+	await _frames(int(Tuning.RELOAD_SECONDS * 60.0 * 0.6))
 	_check(not raid.request_fire("pistol", aim), "no firing while reloading")
 	var mid: int = raid.shown_rounds("pistol")
-	_check(mid > Tuning.STARTING_AMMO and mid < clip, "mid-reload the HUD should show a partial fill, got %d" % mid)
+	_check(mid > 4 and mid < clip, "mid-reload the HUD should show a partial fill, got %d" % mid)
 	await _frames(int(Tuning.RELOAD_SECONDS * 60.0) + 10)
 	_check(raid.loaded_rounds("pistol") == clip, "after reload the magazine should be full, got %d" % raid.loaded_rounds("pistol"))
 	_check(not raid.request_reload(), "reload with a full magazine must be refused")
@@ -70,7 +71,7 @@ func _run() -> void:
 	player.select_weapon("pistol")
 	_check(raid.request_reload(), "reload again after cancelling")
 	await _frames(int(Tuning.RELOAD_SECONDS * 60.0) + 10)
-	_check(raid.loaded_rounds("pistol") == held, "reload should load what the backpack has, got %d" % raid.loaded_rounds("pistol"))
+	_check(raid.loaded_rounds("pistol") == mini(clip, held), "reload should load a full magazine, got %d" % raid.loaded_rounds("pistol"))
 
 	main.queue_free()
 	await process_frame

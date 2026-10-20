@@ -122,10 +122,10 @@ func _run() -> void:
 		await physics_frame
 	var mult := Difficulty.reward_mult(_all(2))
 	_check(results.size() == 1 and results[0]["items"] == {"medkit": Difficulty.scale(4, mult)}, "Hard should scale the kept loot, got %s" % [results])
-	_check(results.size() == 1 and results[0]["points"] == Difficulty.scale(2, mult) and is_equal_approx(results[0]["reward_mult"], mult), "Hard should scale the points")
+	_check(results.size() == 1 and results[0]["points"] == mini(Difficulty.scale(2, mult), 3) and is_equal_approx(results[0]["reward_mult"], mult), "Hard should scale the points")
 	var saved := Profile.new(PATH)
 	saved.load_from_disk()
-	_check(saved.totals.get("medkit", 0) == Difficulty.scale(4, mult) and saved.points == Difficulty.scale(2, mult), "the scaled reward should be what is saved")
+	_check(saved.totals.get("medkit", 0) == Difficulty.scale(4, mult) and saved.points == mini(Difficulty.scale(2, mult), 3), "the scaled reward should be what is saved")
 	hard.queue_free()
 	await process_frame
 	var dying = await _raid(2, false)

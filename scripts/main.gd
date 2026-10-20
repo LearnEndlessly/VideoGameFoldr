@@ -20,6 +20,7 @@ const Crosshair = preload("res://scripts/crosshair.gd")
 const Spawner = preload("res://scripts/spawner.gd")
 const DirectionTick = preload("res://scripts/direction_tick.gd")
 const Hub = preload("res://scripts/hub.gd")
+const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
 const EXTRACT_ZONES := {
@@ -36,6 +37,8 @@ static var chosen_seed := -1
 # How many levels this run has descended (0 = a raid started at the base) and the loot carried down, still unbanked.
 static var depth := 0
 static var carry := {}
+static var run_upgrades := {}  # raid upgrades kept while descending; cleared when the run ends
+static var _launched := false  # the first Main of a real launch starts from an empty profile (Tuning.RESET_ON_LAUNCH)
 
 var rng := RandomNumberGenerator.new()
 var seed_override := -1  # tests set these before add_child
@@ -80,6 +83,7 @@ var _banner: Label
 var _threat_label: Label  # top right: the threat clock countdown, then "converging"
 var _tick: Control  # arrow toward the nearest extract zone, after the threat clock fires
 var _banner_time := 0.0
+var _pick_layer: CanvasLayer  # the level-up screen while it is open
 var _hp_bar: ProgressBar
 var _stats_label: Label
 var _ammo_bar: Control
@@ -89,11 +93,20 @@ var _reload_tip: Label  # "R to reload" under the crosshair
 
 func _ready() -> void:
 	profile = Profile.new(profile_path)
-	profile.load_from_disk()
+	var fresh := resets_profile(profile_path, _launched)
+	_launched = true
+	if fresh:
+		profile.save()  # overwrite last session's file now, or the next scene reload would read it back
+	else:
+		profile.load_from_disk()
 	if show_start:
 		_build_hub()
 	else:
 		_build_raid()
+
+# True for the first Main of a real launch: only the real save file is wiped, never a test or tool profile.
+static func resets_profile(path: String, launched: bool) -> bool:
+	return Tuning.RESET_ON_LAUNCH and not launched and path == Tuning.PROFILE_PATH
 
 func _build_hub() -> void:
 	var hub := Hub.new()
@@ -171,13 +184,12 @@ func _build_raid() -> void:
 	_player.apply_profile(profile)  # the base's upgrades: attributes and the starting weapon
 	raid = Raid.new()
 	raid.profile = profile
-	for id in WeaponData.DATA:
-		raid.damage_mult[id] = profile.damage_mult(id)
 	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
 	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"] + Tuning.DEPTH_AMMO_BONUS * depth
 	raid.reward_mult = profile.reward_mult() + Tuning.DEPTH_REWARD_BONUS * depth
 	raid.drop_mult = 1.0 + Tuning.DEPTH_DROP_BONUS * depth
 	raid.depth = depth
+	raid.upgrades = run_upgrades.duplicate()
 	raid.carry = carry
 	carry = {}
 	raid.b_hold_seconds = float(extract_cfg["b_hold"])
@@ -295,7 +307,7 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	ammo.add_child(_ammo_bar)
 	ammo.add_child(_ammo_label)
 	_reload_tip = Label.new()
-	_reload_tip.text = "R to reload"
+	_reload_tip.text = "Hold R to reload"
 	_reload_tip.add_theme_font_size_override("font_size", 16)
 	_reload_tip.add_theme_color_override("font_color", Color(1, 0.9, 0.1))
 	_reload_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -342,13 +354,15 @@ func _update_status_hud() -> void:
 func _process(_d: float) -> void:
 	if raid == null:
 		return
+	if raid.picks_pending > 0 and _pick_layer == null and raid.state == raid.State.ACTIVE:
+		_open_pick()
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
 	_update_status_hud()
-	_hud.text = "%s\n%s" % ["[SAFE]" if _player.safe else "", _enemy_status()]
+	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status()]
 	_update_threat_hud()
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold R to reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
 		z["beam"].visible = shown
@@ -415,6 +429,26 @@ func _update_threat_hud() -> void:
 		_tick.angle = b["angle"]
 		_tick.text = "%s %.0f m" % ["SAFE" if b["zone"]["id"] == "A" else "FAST", b["distance"]]
 
+# A level-up: pause and offer upgrades; taking one resumes (and offers the next, if several were earned).
+func _open_pick() -> void:
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_pick_layer = CanvasLayer.new()
+	_pick_layer.layer = 9
+	add_child(_pick_layer)
+	var screen := UpgradePick.new()
+	_pick_layer.add_child(screen)
+	screen.show_choices(raid.pick_choices(), raid.upgrades, _picked)
+
+func _picked(id: String) -> void:
+	raid.choose_upgrade(id)
+	Sfx.play("switch")
+	_pick_layer.queue_free()
+	_pick_layer = null
+	get_tree().paused = false
+	if not _player.inventory_open:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
 func _on_threat_started() -> void:
 	_banner.text = "THEY KNOW WHERE YOU ARE\nPatrols are closing in and will keep coming" if raid.threat_continuous \
 		else "THEY KNOW WHERE YOU ARE\nA patrol wave is heading for your position"
@@ -456,6 +490,7 @@ func _on_raid_ended(result: Dictionary) -> void:
 func _return_to_base() -> void:
 	depth = 0
 	carry = {}
+	run_upgrades = {}
 	show_start = true
 	get_tree().paused = false
 	get_tree().reload_current_scene.call_deferred()
@@ -533,6 +568,7 @@ func _descend(items: Dictionary) -> void:
 	profile.take_items(items)
 	profile.save()
 	carry = items
+	run_upgrades = raid.upgrades.duplicate()
 	depth += 1
 	chosen_seed = absi(("descend:%d" % _seed).hash()) % 1000000
 	show_start = false
@@ -542,6 +578,7 @@ func _descend(items: Dictionary) -> void:
 func _next_raid(map_seed := -1) -> void:
 	depth = 0
 	carry = {}
+	run_upgrades = {}
 	chosen_seed = map_seed
 	show_start = false
 	get_tree().paused = false

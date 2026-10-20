@@ -137,6 +137,12 @@ const DEPTH_MAX_ALIVE_EVERY := 2
 const DEPTH_AMMO_BONUS := 6
 const DEPTH_DROP_BONUS := 0.25
 const DEPTH_REWARD_BONUS := 0.25
+# Powerups (data/powerups.gd): an enemy kill drops one with this chance; it vanishes after POWERUP_PICKUP_SECONDS.
+const POWERUP_DROP_CHANCE := 0.25
+const POWERUP_PICKUP_SECONDS := 5.0
+# True: a real launch of the game starts with an empty profile (no stash, points, attributes or difficulty)
+# until saving is built; a raid or the base reloading within the session keeps what was earned.
+const RESET_ON_LAUNCH := true
 # Metres from the player to a crate for a loot request to be accepted.
 const LOOT_REACH := 4.0
 # Master volume for all sound effects, in dB (0 = full, -6 = about half, -80 = silent).

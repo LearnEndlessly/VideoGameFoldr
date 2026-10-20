@@ -43,15 +43,21 @@ profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps noth
 extract.gd       # two extract zones: placement constraints on 40 seeds, determinism, zone B's noise, hold reset, beam reveal radius, threat clock HUD.
 layout_isolation.gd  # everything except the extract zones is identical to the pre-extract build (tests/fixtures/layout_golden.json), and extract tuning moves only the zones.
 enemy_base.gd    # enemy view cones and suspicion, enemy bases and their respawn beams, ammo drops.
+raid_upgrades.gd  # raid upgrades and level-up pauses, powerups (effect, expiry, drops), hold-R reload, the 14-round pistol clip, the launch-reset rule.
 progression.gd  # the scoreboard stats (profile, wall board), the end screen choice, and descending: carried loot, extra bases, faster spawns, ammo, reward, map unchanged.
 base.gd, difficulty.gd, reload.gd, aim_color.gd  # the base of operations and saves, raid difficulty and the reward multiplier, magazines and reload, laser colours.
 ```
 The profile tests print a JSON parse error once; that is the deliberate corrupt-file case.
 
 ## What exists now
-- **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (equip and upgrade weapons), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and a raid terminal with five difficulty options that scale the rewards.
+- **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (choose the starting weapon), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and a raid terminal with five difficulty options that scale the rewards.
 - **Raid**: seeded procedural map whose cover varies a lot from map to map (8 to 37 boxes in 160 seeds, a per-map cover mix and a per-map walkable gap of 2.7 to 4 m, `COVER_*` and `PATH_GAP_RANGE` in `data/tuning.gd`), two loot buildings (an olive armory with a yellow band, roof merlons and painted rounds; a white med post with a red cross on its walls and a big one on its roof), each taller than before (4.6 m / 4.2 m) with two doorways on opposite walls, cover, two safe nooks, enemy patrols with visible view cones and a suspicion meter, four enemy bases that respawn defenders (red beams show the countdown), ammo drops, a threat clock that sends every patrol after you.
 - **Extraction: two routes.** Zone A "Safe route" is far from the start with an 8 s hold. Zone B "Fast route" is close to the start with a 12 s hold and is noisy: starting a hold alerts every enemy group within 30 m. Extract beams only show within 25 m, so there is no compass; the map pit in the base shows both. A threat clock countdown (top right) turns amber at 30 s and red at 10 s, and after it fires an arrow points toward the nearest zone.
+- **Upgrades in the raid.** Weapon and character upgrades are won during a raid and lost when it ends (extract or death; a descent keeps them). Every 2 kills earns a level-up: the game pauses and offers 3 random upgrades (Heavy rounds, Rapid fire, Vitality, Fleet foot, Quick hands, Plating), pick with a click or 1/2/3. Numbers in `data/upgrades.gd`.
+- **Attributes** (speed, constitution, handling) are permanent and spent only at the base's Character station. At most 3 points come home from one raid (`POINTS_PER_RAID_MAX`).
+- **Powerups** (`data/powerups.gd`): an enemy kill drops one 25% of the time (`POWERUP_DROP_CHANCE`). It lies on the ground for 5 s (`POWERUP_PICKUP_SECONDS`), blinking at the end; touch it for 10 s of Overdrive (+50% damage), Haste (+40% speed) or Shield (half damage taken).
+- **Reloading** runs only while R is held; letting go cancels it. The pistol's magazine is 14 rounds (45% of the old 30).
+- **No saves yet:** a real launch starts with an empty profile (no stash, points, attributes or difficulty choices); the base and raids within one session keep what was earned (`RESET_ON_LAUNCH` in `data/tuning.gd`). Test and tool profiles are never reset.
 - **Scoreboard.** The base's north wall carries the RAID LEDGER: runs, extracted, killed in action, survival rate, kills, shots fired, accuracy (shots that hurt something) and deepest level, kept in the profile for every raid (`Profile.record_raid`).
 - **Going deeper.** After an extract the end screen offers DESCEND next to RETURN TO BASE. Descending takes the loot just extracted back out of the stash and into the next level's backpack, unbanked and at risk again, on a fresh map (new crates). Each level adds enemy bases (from their own RNG stream), faster base spawns, one more defender per base every two levels, more starting ammo and likelier ammo drops, and +25% to the reward multiplier. Dying loses the carried loot; returning to base banks it. The HUD shows the level.
 - **Menu style** (`scripts/ui_kit.gd`): every panel uses one look: dark slabs with a hard accent edge in the station's colour, hazard tape under headers, heavy spaced capitals, big numerals, item and stat tiles, pips for levels, meters for weapon stats, a risk dial for difficulty and one oversized button for the action that matters. The end screen stamps the verdict (EXTRACTED / K.I.A.) and the safe choice has the focus. Design notes and references: `docs/MENU_DESIGN.md`.
@@ -73,6 +79,15 @@ All in `data/tuning.gd`:
 
 ## Tuning values to look at first (going deeper)
 All in `data/tuning.gd`: `DEPTH_EXTRA_SPAWNERS` (1) and `DEPTH_MAX_EXTRA_SPAWNERS` (4), `DEPTH_INTERVAL_MULT` (0.85 per level) and `DEPTH_MIN_INTERVAL` (4 s), `DEPTH_MAX_ALIVE_EVERY` (2), `DEPTH_AMMO_BONUS` (6), `DEPTH_DROP_BONUS` (0.25), `DEPTH_REWARD_BONUS` (0.25).
+
+## Assumptions made for the in-raid upgrades and powerups
+- "Character and weapon upgrades" became the six raid upgrades above (the old stash-paid weapon upgrades are gone, and old saves' weapon levels are ignored); "attributes" stayed as the permanent base system. Say if you meant something else.
+- A descent keeps the run's raid upgrades, because it is the same run; extracting to the base or dying clears them.
+- A level-up pauses the whole game (the threat clock too) while you choose. Kills earn picks, nothing else does.
+- Powerup effects last 10 s from pickup and picking up the same kind again restarts the 10 s; they do not stack with themselves. Powerups are not kept on descending.
+- The 5 s is the time a dropped powerup lies on the ground.
+- The reset on launch only wipes the real `profile.json` (the path in `Tuning.PROFILE_PATH`) at the first start of the process; it is written empty immediately so a scene reload cannot read last session's file. That includes your current stash and difficulty choices.
+- Not built: saving raid upgrades, rarity, a use for scrap, level-ups from anything but kills.
 
 ## Assumptions made for the map variety and buildings
 - This changed every old seed (cover count, mix and gap are new draws); `seed_golden.json` and `layout_golden.json` were regenerated, with a scratch profile because the raid difficulty in the real profile changes the enemies in the fingerprint.

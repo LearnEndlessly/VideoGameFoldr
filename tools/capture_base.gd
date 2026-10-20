@@ -8,6 +8,7 @@ const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
 const ScreenUI = preload("res://scripts/screen_ui.gd")
+const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const PATH := "user://capture_base_profile.json"
 
 var out := ""
@@ -27,7 +28,6 @@ func _init() -> void:
 	var p := Profile.new(PATH)
 	p.add_items({"ammo": 64, "medkit": 5})
 	p.points = 2
-	p.weapons = {"pistol": 1}
 	p.stats = {"runs": 6, "extracts": 4, "deaths": 2, "kills": 37, "shots": 212, "hits": 96, "deepest": 3}
 	p.save()
 	Main.show_start = true
@@ -61,5 +61,12 @@ func _init() -> void:
 		await _frames(3)
 		await _shot("b_result_%s" % outcome)
 		layer.queue_free()
+	var pick_layer := CanvasLayer.new()
+	root.add_child(pick_layer)
+	var pick := UpgradePick.new()
+	pick_layer.add_child(pick)
+	pick.show_choices(["damage", "vitality", "hands"], {"damage": 1}, func(_id): pass)
+	await _frames(3)
+	await _shot("b_level_up")
 	DirAccess.remove_absolute(PATH)
 	quit()

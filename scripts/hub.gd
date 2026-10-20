@@ -429,10 +429,6 @@ func _equip(id: String) -> void:
 	if profile.equip(id):
 		_commit()
 
-func _upgrade(id: String) -> void:
-	if profile.upgrade_weapon(id):
-		_commit()
-
 func _spend(id: String) -> void:
 	if profile.spend_point(id):
 		_commit()
@@ -461,17 +457,16 @@ func _fill_stash() -> void:
 
 func _fill_armory() -> void:
 	var a := _accent()
-	_label("STASH   %s" % (_cost_text(profile.totals).to_upper() if not profile.totals.is_empty() else "EMPTY"), 13, UIKit.DIM)
+	_label("Pick the weapon you start raids with. Weapon and character upgrades are won during a raid and are lost when it ends.", 13, UIKit.DIM)
 	var most := {"damage": 1.0, "clip": 1.0, "range": 1.0}  # the best of each stat, so the meters compare weapons
 	for id in WeaponData.DATA:
 		var w: Dictionary = WeaponData.DATA[id]
-		most["damage"] = maxf(most["damage"], w["damage"] * w["pellets"] * (1.0 + Upgrades.WEAPON_MAX_LEVEL * Upgrades.WEAPON_DAMAGE_PER_LEVEL))
+		most["damage"] = maxf(most["damage"], w["damage"] * w["pellets"])
 		most["clip"] = maxf(most["clip"], w["clip"])
 		most["range"] = maxf(most["range"], w["effective"])
 	var cards := _row(null, 12)
 	for id in WeaponData.DATA:
 		var w: Dictionary = WeaponData.DATA[id]
-		var level: int = profile.weapon_level(id)
 		var equipped: bool = profile.equipped == id
 		var card := PanelContainer.new()
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -481,9 +476,7 @@ func _fill_armory() -> void:
 		v.add_theme_constant_override("separation", 8)
 		card.add_child(v)
 		v.add_child(UIKit.label(str(w["name"]).to_upper(), 26, UIKit.TEXT, true))
-		v.add_child(UIKit.pips(level, Upgrades.WEAPON_MAX_LEVEL, a))
-		var dmg: float = w["damage"] * w["pellets"] * profile.damage_mult(id)
-		for stat in [["DAMAGE", dmg / most["damage"], "%d x %d" % [int(round(w["damage"] * profile.damage_mult(id))), w["pellets"]]],
+		for stat in [["DAMAGE", w["damage"] * w["pellets"] / most["damage"], "%d x %d" % [w["damage"], w["pellets"]]],
 				["CLIP", w["clip"] / most["clip"], str(w["clip"])], ["RANGE", w["effective"] / most["range"], "%d m" % w["effective"]]]:
 			var line := _row(v)
 			var cap := UIKit.label(stat[0], 12, UIKit.DIM)
@@ -491,12 +484,9 @@ func _fill_armory() -> void:
 			line.add_child(cap)
 			line.add_child(UIKit.meter(stat[1], a, 90))
 			line.add_child(UIKit.label(stat[2], 13))
-		var equip := _button(v, "EQUIPPED" if equipped else "TAKE INTO RAIDS", _equip.bind(id), equipped)
+		var equip := _button(v, "STARTING WEAPON" if equipped else "TAKE INTO RAIDS", _equip.bind(id), equipped)
 		if equipped:
 			UIKit.mark_chosen(equip, a)
-		var cost: Dictionary = profile.upgrade_cost(id)
-		_button(v, ("UPGRADE  " + _cost_text(cost).to_upper()) if not cost.is_empty() else "MAX LEVEL", _upgrade.bind(id),
-			cost.is_empty() or not profile.can_afford(cost))
 
 func _fill_character() -> void:
 	var a := _accent()
@@ -506,7 +496,7 @@ func _fill_character() -> void:
 	cap.alignment = BoxContainer.ALIGNMENT_CENTER
 	top.add_child(cap)
 	cap.add_child(UIKit.label("ATTRIBUTE POINTS", 18, UIKit.TEXT, true))
-	cap.add_child(UIKit.label("%d per extract, +1 for every %d frags in it" % [Upgrades.POINTS_PER_EXTRACT, Upgrades.KILLS_PER_POINT], 12, UIKit.DIM))
+	cap.add_child(UIKit.label("%d per extract, +1 for every %d frags in it, at most %d per raid" % [Upgrades.POINTS_PER_EXTRACT, Upgrades.KILLS_PER_POINT, Upgrades.POINTS_PER_RAID_MAX], 12, UIKit.DIM))
 	for id in Upgrades.ATTRS:
 		var at: Dictionary = Upgrades.ATTRS[id]
 		var level: int = profile.attr_level(id)

@@ -1,6 +1,5 @@
 extends RefCounted
-# Persisted player data, kept between raids: the stash (loot kept), weapon upgrades and the equipped
-# weapon, attribute levels and unspent points, and lifetime stats. Separate from raid state; loot only
+# Persisted player data, kept between raids: the stash (loot kept), the equipped weapon, attribute levels and unspent points, and lifetime stats. Separate from raid state; loot only
 # gets in through add_items() after a successful extract. Every change is saved by the caller (save()).
 
 const Tuning = preload("res://data/tuning.gd")
@@ -11,7 +10,6 @@ const Difficulty = preload("res://data/difficulty.gd")
 
 var path: String
 var totals := {}  # item id -> quantity in the stash
-var weapons := {}  # weapon id -> upgrade level (missing = 0)
 var equipped := "pistol"  # the weapon held at the start of a raid
 var attrs := {}  # attribute id -> level (missing = 0)
 var points := 0  # unspent attribute points
@@ -26,7 +24,6 @@ func _init(file_path: String = Tuning.PROFILE_PATH) -> void:
 
 func load_from_disk() -> void:
 	totals = {}
-	weapons = {}
 	equipped = "pistol"
 	attrs = {}
 	points = 0
@@ -44,12 +41,7 @@ func load_from_disk() -> void:
 		if not Loot.ITEMS.has(str(id)):  # an item removed from the game (e.g. scrap) is dropped from old saves
 			continue
 		totals[str(id)] = int(data["totals"][id])
-	# Everything below arrived in version 2; an older file simply lacks it.
-	var w = data.get("weapons")
-	if typeof(w) == TYPE_DICTIONARY:
-		for id in w:
-			if WeaponData.DATA.has(str(id)):
-				weapons[str(id)] = clampi(int(w[id]), 0, Upgrades.WEAPON_MAX_LEVEL)
+	# Everything below arrived in version 2; an older file simply lacks it (weapon upgrade levels in old files are ignored).
 	if WeaponData.DATA.has(str(data.get("equipped", ""))):
 		equipped = str(data["equipped"])
 	var a = data.get("attrs")
@@ -97,42 +89,12 @@ func accuracy() -> int:
 # A successful extract: bank the points it earned (see data/upgrades.gd, scaled by the raid's reward
 # multiplier) and the lifetime stats. Returns the points gained.
 func record_extract(kills: int, reward_mult := 1.0) -> int:
-	var gained := Difficulty.scale(Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT, reward_mult)
+	var gained := mini(Difficulty.scale(Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT, reward_mult), Upgrades.POINTS_PER_RAID_MAX)
 	points += gained
 	stats["extracts"] += 1
 	return gained
 
 # --- weapons ---
-
-func weapon_level(id: String) -> int:
-	return int(weapons.get(id, 0))
-
-func damage_mult(id: String) -> float:
-	return 1.0 + Upgrades.WEAPON_DAMAGE_PER_LEVEL * weapon_level(id)
-
-# What the next level costs, {} if the weapon is at its top level.
-func upgrade_cost(id: String) -> Dictionary:
-	var level := weapon_level(id)
-	return {} if level >= Upgrades.WEAPON_MAX_LEVEL else Upgrades.WEAPON_COSTS[level]
-
-func can_afford(cost: Dictionary) -> bool:
-	for id in cost:
-		if int(totals.get(id, 0)) < int(cost[id]):
-			return false
-	return true
-
-# Pays the cost from the stash and raises the weapon one level. False (nothing changes) if it is at
-# its top level or the stash is short.
-func upgrade_weapon(id: String) -> bool:
-	var cost := upgrade_cost(id)
-	if not WeaponData.DATA.has(id) or cost.is_empty() or not can_afford(cost):
-		return false
-	for item in cost:
-		totals[item] = int(totals[item]) - int(cost[item])
-		if totals[item] <= 0:
-			totals.erase(item)
-	weapons[id] = weapon_level(id) + 1
-	return true
 
 func equip(id: String) -> bool:
 	if not WeaponData.DATA.has(id):
@@ -186,7 +148,7 @@ func save() -> bool:
 	if f == null:
 		push_error("Cannot write profile to %s" % tmp)
 		return false
-	f.store_string(JSON.stringify({"version": 2, "totals": totals, "weapons": weapons, "equipped": equipped,
+	f.store_string(JSON.stringify({"version": 2, "totals": totals, "equipped": equipped,
 		"attrs": attrs, "points": points, "difficulty": difficulty, "stats": stats}, "\t"))
 	f.close()
 	return DirAccess.rename_absolute(tmp, path) == OK

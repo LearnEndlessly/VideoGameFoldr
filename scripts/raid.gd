@@ -10,6 +10,9 @@ const Recipes = preload("res://data/recipes.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
 const Pickup = preload("res://scripts/pickup.gd")
 const Difficulty = preload("res://data/difficulty.gd")
+const Upgrades = preload("res://data/upgrades.gd")
+const Powerups = preload("res://data/powerups.gd")
+const Powerup = preload("res://scripts/powerup.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -49,15 +52,23 @@ var drop_mult := 1.0  # scales the ammo drop chance (deeper levels drop more)
 var ammo_spent := 0
 var start_ammo: int = Tuning.STARTING_AMMO  # set by main from the raid difficulty
 var reward_mult := 1.0  # scales the loot kept and the points earned on an extract (data/difficulty.gd)
-var damage_mult := {}  # weapon id -> damage multiplier from the profile's weapon upgrades
+var damage_mult := {}  # weapon id -> extra damage multiplier (tests use it); raid upgrades and powerups apply on top
 var reload_seconds: float = Tuning.RELOAD_SECONDS  # shortened by the Weapon handling attribute
 var loaded := {}  # weapon id -> rounds in its magazine; the backpack holds the rest
 var reload_weapon := ""  # weapon being reloaded, "" if none
 var reload_left := 0.0
+var upgrades := {}  # raid upgrade id -> level (data/upgrades.gd); set by main before setup, lost when the raid ends
+var picks_pending := 0  # level-ups earned and not yet taken
+var powerups := {}  # active powerup id -> seconds left
+var cooldown_mult := 1.0  # the Rapid fire upgrade shortens the wait between shots
 
 var _threat_reached := false
 var _drop_rng := RandomNumberGenerator.new()  # enemy drops; seeded per raid so a test can replay them
 var _player
+var _base := {}  # the player's numbers before raid upgrades and powerups
+var _dmg_factor := 1.0
+var _kills_toward_pick := 0
+var _power_rng := RandomNumberGenerator.new()
 var _fire_cooldown := 0.0
 var _sample_clock := Telemetry.SAMPLE_SECONDS  # starts full so the first sample is logged at once
 var _threat_done := false  # a wave has run; it does not start again
@@ -66,6 +77,8 @@ var _wave_left := 0.0
 func setup(player) -> void:
 	_player = player
 	_drop_rng.seed = seed_value
+	_power_rng.seed = seed_value + 3
+	_base = {"hp": player.max_health, "armor": player.armor, "speed": player.speed_mult, "reload": reload_seconds}
 	player.died.connect(_on_player_died)
 	for id in carry:
 		player.inventory.add(id, int(carry[id]))
@@ -74,6 +87,7 @@ func setup(player) -> void:
 	for id in WeaponData.DATA:
 		loaded[id] = mini(WeaponData.DATA[id]["clip"], player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
 	Telemetry.start({"seed": seed_value, "start_ammo": start_ammo, "reward_mult": reward_mult, "threat_delay": threat_delay, "depth": depth, "map": map_info})
+	_apply_upgrades()
 
 # Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
 # for the result; otherwise nothing changes. The result is announced like a pickup.
@@ -130,7 +144,7 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 	if state != State.ACTIVE or _fire_cooldown > 0.0 or reload_weapon != "" or not WeaponData.DATA.has(weapon_id):
 		return false
 	var w: Dictionary = WeaponData.DATA[weapon_id]
-	_fire_cooldown = w["cooldown"]  # also paces the dry-fire click
+	_fire_cooldown = w["cooldown"] * cooldown_mult  # also paces the dry-fire click
 	var item: String = w["ammo_item"]
 	var cost: int = w["ammo_per_shot"]
 	if loaded_rounds(weapon_id) < cost or not _player.inventory.remove(item, cost):
@@ -155,7 +169,7 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		query.exclude = [_player.get_rid()]
 		var hit: Dictionary = space.intersect_ray(query)
 		if hit and hit["collider"].has_method("take_damage"):
-			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0))))
+			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor))
 			hits += 1
 			total_dmg += dmg
 			var enemy = hit["collider"]
@@ -167,10 +181,76 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 				_player.kills += 1
 				Telemetry.emit("player.kill.enemy", kill_info)
 				_drop_ammo(enemy.global_position, enemy.stats)
+				_on_kill(enemy.global_position)
 	if hits > 0:
 		shots_hit += 1
 	Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "fired", "hits": hits, "dmg": total_dmg, "ammo_left": _player.inventory.count(item)})
 	return true
+
+# --- raid upgrades and powerups ---
+
+func _lvl(id: String) -> int:
+	return int(upgrades.get(id, 0))
+
+# Recomputes the player's numbers from the base values, the raid upgrades and the active powerups.
+func _apply_upgrades() -> void:
+	var up: Dictionary = Upgrades.RAID_UPGRADES
+	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * _lvl("damage")) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
+	cooldown_mult = 1.0 - float(up["firerate"]["per_level"]) * _lvl("firerate")
+	reload_seconds = float(_base["reload"]) * (1.0 - float(up["hands"]["per_level"]) * _lvl("hands"))
+	_player.max_health = int(_base["hp"]) + int(up["vitality"]["hp"]) * _lvl("vitality")
+	_player.health = mini(_player.health, _player.max_health)
+	var armor := minf(float(_base["armor"]) + float(up["plating"]["per_level"]) * _lvl("plating"), 0.8)
+	if powerups.has("shield"):
+		armor = 1.0 - (1.0 - armor) * float(Powerups.DATA["shield"]["taken"])
+	_player.armor = armor
+	_player.speed_mult = (float(_base["speed"]) + float(up["sprint"]["per_level"]) * _lvl("sprint")) * (float(Powerups.DATA["haste"]["mult"]) if powerups.has("haste") else 1.0)
+
+# Every RAID_KILLS_PER_PICK kills earns a level-up; a kill may also drop a powerup.
+func _on_kill(pos: Vector3) -> void:
+	_kills_toward_pick += 1
+	if _kills_toward_pick >= Upgrades.RAID_KILLS_PER_PICK:
+		_kills_toward_pick = 0
+		picks_pending += 1
+	if _power_rng.randf() < Tuning.POWERUP_DROP_CHANCE:
+		var p := Powerup.new()
+		p.id = Powerups.DATA.keys()[_power_rng.randi_range(0, Powerups.DATA.size() - 1)]
+		p.position = pos
+		get_parent().add_child.call_deferred(p)
+
+# Up to RAID_PICK_CHOICES random upgrades that are not at their max level yet.
+func pick_choices() -> Array:
+	var open: Array = Upgrades.RAID_UPGRADES.keys().filter(func(id): return _lvl(id) < int(Upgrades.RAID_UPGRADES[id]["max"]))
+	open.shuffle()
+	return open.slice(0, Upgrades.RAID_PICK_CHOICES)
+
+# Spends a pending level-up on upgrade `id`. False (nothing changes) with none pending or the upgrade at its max.
+func choose_upgrade(id: String) -> bool:
+	if state != State.ACTIVE or picks_pending <= 0 or not Upgrades.RAID_UPGRADES.has(id) or _lvl(id) >= int(Upgrades.RAID_UPGRADES[id]["max"]):
+		return false
+	picks_pending -= 1
+	upgrades[id] = _lvl(id) + 1
+	_apply_upgrades()
+	if id == "vitality":
+		_player.health = mini(_player.health + int(Upgrades.RAID_UPGRADES[id]["hp"]), _player.max_health)
+	Telemetry.emit("player.pick.upgrade", {"id": id, "level": _lvl(id)})
+	return true
+
+# The player walked into a powerup: its effect starts (or restarts) for its full duration.
+func collect_powerup(p) -> bool:
+	if state != State.ACTIVE or not is_instance_valid(p) or p.is_queued_for_deletion():
+		return false
+	powerups[p.id] = float(Powerups.DATA[p.id]["seconds"])
+	p.queue_free()
+	_apply_upgrades()
+	return true
+
+# "OVERDRIVE 8s  HASTE 3s" for the HUD, "" with none active.
+func powerup_text() -> String:
+	var parts: Array = []
+	for id in powerups:
+		parts.append("%s %ds" % [Powerups.DATA[id]["name"], ceili(powerups[id])])
+	return "  ".join(parts)
 
 # Rolls an enemy's ammo drop (data/enemies.gd) and, on success, leaves a pickup where it died.
 func _drop_ammo(pos: Vector3, stats: Dictionary) -> bool:
@@ -266,6 +346,11 @@ func _physics_process(delta: float) -> void:
 			reload_weapon = ""
 			reload_done.emit(id)
 	elapsed += delta
+	for id in powerups.keys():
+		powerups[id] -= delta
+		if powerups[id] <= 0.0:
+			powerups.erase(id)
+			_apply_upgrades()
 	Telemetry.clock = elapsed
 	_sample_clock += delta
 	if _sample_clock >= Telemetry.SAMPLE_SECONDS:

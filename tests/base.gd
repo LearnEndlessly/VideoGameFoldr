@@ -36,21 +36,17 @@ func _frames(n: int) -> void:
 func _run() -> void:
 	_clean()
 
-	# Weapon upgrades are paid from the stash and stop at the top level.
+	# Weapons are only chosen in the base now; their upgrades are won in the raid.
 	var p := Profile.new(PATH)
 	p.load_from_disk()
-	_check(not p.upgrade_weapon("pistol"), "an empty stash cannot pay for an upgrade")
 	p.add_items({"ammo": 70, "medkit": 6})
-	_check(p.upgrade_weapon("pistol") and p.weapon_level("pistol") == 1 and p.totals["ammo"] == 60, "level 1 should cost 10 ammo, stash %s" % [p.totals])
-	_check(p.upgrade_weapon("pistol") and p.totals == {"ammo": 40, "medkit": 4}, "level 2 should cost 20 ammo and 2 medkit, stash %s" % [p.totals])
-	_check(p.upgrade_weapon("pistol") and p.totals == {"ammo": 10}, "level 3 should cost 30 ammo and 4 medkit, stash %s" % [p.totals])
-	_check(not p.upgrade_weapon("pistol") and p.weapon_level("pistol") == 3, "a weapon cannot go past the max level")
-	_check(is_equal_approx(p.damage_mult("pistol"), 1.0 + 3.0 * Upgrades.WEAPON_DAMAGE_PER_LEVEL), "damage should scale with level")
 	_check(p.equip("scattergun") and p.equipped == "scattergun" and not p.equip("not_a_weapon"), "equip should accept real weapons only")
 
 	# Attribute points: earned on extract (1 + 1 per 5 kills), spent one level at a time.
 	_check(not p.spend_point("speed"), "no points, no level")
 	_check(p.record_extract(12) == 3 and p.points == 3 and p.stats["extracts"] == 1, "12 kills should earn 1 + 2 points, got %d" % p.points)
+	_check(p.record_extract(100) == Upgrades.POINTS_PER_RAID_MAX and p.points == 3 + Upgrades.POINTS_PER_RAID_MAX, "a huge raid is capped at %d points, got %d" % [Upgrades.POINTS_PER_RAID_MAX, p.points])
+	p.points = 3
 	_check(p.spend_point("speed") and p.spend_point("constitution") and p.spend_point("constitution") and p.points == 0, "three points, three levels")
 	_check(not p.spend_point("handling"), "spending needs a point")
 	_check(is_equal_approx(p.speed_mult(), 1.06) and p.max_health(100) == 120 and is_equal_approx(p.armor(), 0.08), "attribute effects were wrong")
@@ -65,18 +61,17 @@ func _run() -> void:
 	_check(p.save(), "save failed")
 	var q := Profile.new(PATH)
 	q.load_from_disk()
-	_check(q.totals == p.totals and q.weapons == p.weapons and q.attrs == p.attrs and q.points == p.points \
+	_check(q.totals == p.totals and q.attrs == p.attrs and q.points == p.points \
 		and q.equipped == p.equipped and q.stats == p.stats, "reload differed: %s vs %s" % [var_to_str(q.attrs), var_to_str(p.attrs)])
 	var old := FileAccess.open(PATH, FileAccess.WRITE)
 	old.store_string('{"version": 1, "totals": {"ammo": 4}}')
 	old.close()
 	q.load_from_disk()
-	_check(q.totals == {"ammo": 4} and q.weapons.is_empty() and q.equipped == "pistol" and q.points == 0, "a version 1 save should load with defaults")
+	_check(q.totals == {"ammo": 4} and q.equipped == "pistol" and q.points == 0, "a version 1 save should load with defaults")
 
-	# Upgrades carry into a raid: attributes and the starting weapon on the player, damage and reload on the raid.
+	# Attributes carry into a raid: health, armor, speed and reload, and the starting weapon.
 	Main.show_start = false
 	var prof := Profile.new(PATH)
-	prof.weapons = {"pistol": 1}
 	prof.attrs = {"constitution": 3, "speed": 2, "handling": 1}
 	prof.equipped = "scattergun"
 	prof.save()
@@ -92,7 +87,7 @@ func _run() -> void:
 	var e = _target(main)
 	await _frames(20)
 	main.raid.request_fire("pistol", player._cam.global_transform)
-	_check(is_equal_approx(e.health, 20.0), "a level 1 pistol hits for 30 (50 - 30 = 20), grunt health was %s" % e.health)
+	_check(is_equal_approx(e.health, 25.0), "a pistol hits for 25 (50 - 25 = 25), grunt health was %s" % e.health)
 	main.queue_free()
 	await process_frame
 
@@ -133,13 +128,12 @@ func _run() -> void:
 	var armory = get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "armory")[0]
 	hub._on_station_used(armory)
 	_check(hub.open_station == "armory" and hub._panel.visible and hub.player.inventory_open, "using a station should open its panel")
-	hub._upgrade("pistol")
 	hub._equip("scattergun")
 	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "character")[0])
 	hub._spend("speed")
 	var saved := Profile.new(PATH)
 	saved.load_from_disk()
-	_check(saved.weapon_level("pistol") == 1 and saved.totals == {"ammo": 40, "medkit": 4}, "an upgrade made in the base should be saved, stash %s" % [saved.totals])
+	_check(saved.totals == {"ammo": 50, "medkit": 4}, "the stash should be untouched by visiting the armory, stash %s" % [saved.totals])
 	_check(saved.equipped == "scattergun" and saved.attr_level("speed") == 1 and saved.points == 0, "equip and attribute changes should be saved")
 	var started := [-1]
 	hub.start_raid = func(map_seed): started[0] = map_seed

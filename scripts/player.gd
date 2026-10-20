@@ -25,6 +25,7 @@ var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
 var inventory_open := false
+var _key_reload := false  # the current reload was started by holding R
 var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
 var weapon_id := "pistol"
@@ -114,9 +115,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_2:
 			select_weapon("scattergun")
 			Sfx.play("switch")
-		elif event.keycode == KEY_R and raid != null:
-			if raid.request_reload():
-				Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
@@ -168,6 +166,14 @@ func _physics_process(delta: float) -> void:
 			_step_dist = 0.0
 			Sfx.play("step_player")
 
+	if raid != null:  # a reload started with R only runs while R is held; letting go cancels it
+		if Input.is_physical_key_pressed(KEY_R) and not inventory_open:
+			if raid.request_reload():
+				_key_reload = true
+				Sfx.play("switch")
+		elif _key_reload:
+			_key_reload = false
+			raid.cancel_reload()
 	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		raid.request_fire(weapon_id, _cam.global_transform)  # the raid checks cooldown and ammo
