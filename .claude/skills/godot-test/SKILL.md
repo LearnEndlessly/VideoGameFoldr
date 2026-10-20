@@ -40,6 +40,7 @@ If the script warns that the real telemetry folder changed, a test wrote to the 
 | check | RNG determinism, loot weights and zones, inventory, damage falloff, every sound |
 | smoke | opens crates, uses items, shoots, alerts a pack in a real raid |
 | spawn_safety | enemies never spawn near the start; no damage in the first 2 s (60 maps) |
+| seed_golden | map generation is unchanged for fixed seeds (guard for refactoring main.gd) |
 | map_layout | map shapes vary, 3 loot zones, crates only inside them, everything walkable (40 maps) |
 | profile_unit, profile_flow | saved profile, extract keeps loot, death keeps none, restart reload |
 | ammo_threat | ammo, cooldown, starting-kit rule, group count, threat clock modes |

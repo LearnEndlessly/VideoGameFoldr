@@ -32,6 +32,7 @@ check.gd         # RNG determinism, loot weights, inventory, damage falloff
 smoke.gd         # opens crates, uses items, shoots, alerts a pack
 spawn_safety.gd  # 60 maps: no enemy group near the player's start; 20 maps: no damage in the first 2 s. Exit code 1 on failure.
 map_layout.gd    # 40 maps: shapes vary, 3 loot areas, crates only inside them, and every key place is walkable from the start. Exit code 1 on failure.
+seed_golden.gd   # 8 seeds: same seed builds the same map twice and matches tests/fixtures/seed_golden.json. After an intended generation change, regenerate with `-- --write`. Exit code 1 on failure.
 rebalance.gd     # the design changes below: repair kits never drop, crafting, line of sight and sprint noise, guarded armory, backpack size. Exit code 1 on failure.
 telemetry.gd     # event log in a scratch folder: map on the first line, samples, crate events, runs.jsonl, the 100-file cache cap, naming grammar, enabled flag. Exit code 1 on failure.
 models.gd        # optional art: model paths replace the placeholder shapes, missing files fall back, alert tint, weapon model. Exit code 1 on failure.
