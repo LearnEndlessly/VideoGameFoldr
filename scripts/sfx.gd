@@ -10,7 +10,7 @@ const RATE := 22050
 static var _cache := {}
 static var _last_played := {}  # sound name -> msec of the last play, for min_gap
 
-static func play(sound: String, pos = null) -> void:
+static func play(sound: String, pos = null, pitch := 1.0) -> void:
 	var def: Dictionary = Sounds.DATA[sound]
 	var now := Time.get_ticks_msec()
 	if now - int(_last_played.get(sound, -100000)) < float(def["min_gap"]) * 1000.0:
@@ -23,13 +23,15 @@ static func play(sound: String, pos = null) -> void:
 	if pos != null and def.get("positional", false):
 		var p3 := AudioStreamPlayer3D.new()
 		p3.position = pos
-		p3.max_distance = 60.0
+		p3.max_distance = def.get("max_distance", 60.0)
+		p3.pitch_scale = pitch
 		p3.stream = stream_for(sound)
 		p3.volume_db = Tuning.SFX_VOLUME_DB
 		p3.finished.connect(p3.queue_free)
 		p = p3
 	else:
 		var p2 := AudioStreamPlayer.new()
+		p2.pitch_scale = pitch
 		p2.stream = stream_for(sound)
 		p2.volume_db = Tuning.SFX_VOLUME_DB
 		p2.finished.connect(p2.queue_free)

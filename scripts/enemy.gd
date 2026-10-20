@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
 const Sfx = preload("res://scripts/sfx.gd")
+const Tuning = preload("res://data/tuning.gd")
 
 const REACH := 1.8
 const SIGHT := 18.0         # a patrolling enemy notices the player inside this range
@@ -20,6 +21,7 @@ var alert := false
 var _attack_cd := 0.0
 var _lost_timer := 0.0
 var _repick := 0.0
+var _step_dist := 0.0  # metres walked since the last footstep sound
 var _target := Vector3.ZERO
 var _mat := StandardMaterial3D.new()
 var _label := Label3D.new()
@@ -152,6 +154,7 @@ func _physics_process(delta: float) -> void:
 				_attack_cd -= delta
 				if _attack_cd <= 0.0:
 					_attack_cd = 1.0
+					Sfx.play("enemy_strike", global_position)
 					player.take_damage(stats["damage"])
 	else:
 		_repick -= delta
@@ -165,6 +168,20 @@ func _physics_process(delta: float) -> void:
 
 	velocity.y = velocity.y - 20.0 * delta if not is_on_floor() else 0.0
 	move_and_slide()
+	_footsteps(delta, player)
+
+# Heavier enemies take longer strides and sound lower.
+func _footsteps(delta: float, player) -> void:
+	var speed := Vector2(velocity.x, velocity.z).length()
+	if speed < 0.1 or not is_on_floor():
+		return
+	_step_dist += speed * delta
+	var size: float = stats["size"]
+	if _step_dist < Tuning.ENEMY_STRIDE * size:
+		return
+	_step_dist = 0.0
+	if player != null and global_position.distance_to(player.global_position) < Tuning.ENEMY_STEP_HEAR_DISTANCE:
+		Sfx.play("step_enemy", global_position, 1.0 / size)
 
 func _walk(dir: Vector3, speed: float) -> void:
 	var d := dir.normalized() * speed

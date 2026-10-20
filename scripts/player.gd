@@ -4,6 +4,7 @@ const Inventory = preload("res://scripts/inventory.gd")
 const Loot = preload("res://data/loot.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Sfx = preload("res://scripts/sfx.gd")
+const Tuning = preload("res://data/tuning.gd")
 
 signal died
 signal inventory_toggled(open: bool)
@@ -22,6 +23,7 @@ var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
 var weapon: Dictionary = WeaponData.DATA["pistol"]
 var _cooldown := 0.0
+var _step_dist := 0.0  # metres walked since the last footstep sound
 var _head: Node3D
 var _cam: Camera3D
 var _beam_near: MeshInstance3D
@@ -104,6 +106,11 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y -= 20.0 * delta
 	move_and_slide()
+	if is_on_floor():
+		_step_dist += Vector2(velocity.x, velocity.z).length() * delta
+		if _step_dist >= Tuning.PLAYER_STRIDE:
+			_step_dist = 0.0
+			Sfx.play("step_player")
 
 	_cooldown -= delta
 	if _cooldown <= 0.0 and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
