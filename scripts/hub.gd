@@ -1,11 +1,12 @@
 extends Node3D
-# The base of operations: a closed, enemy-free room the player returns to after every raid. A station in the middle of each wall and a map table in the centre, each opened with E (or a click)
+# The base of operations: a closed, enemy-free room the player returns to after every raid. A station in the middle of each wall and a map pit in the floor at the centre, each opened with E (or a click)
 # while looking at it:
 #   STASH       the loot kept from raids
 #   ARMORY      choose the starting weapon and upgrade weapons with stash loot
 #   CHARACTER   spend attribute points (speed, constitution, weapon handling)
-#   MAP TABLE   a miniature of the next raid's map; change the seed to get a different map
-#   RAID TERMINAL  the button that starts a raid on the map on the table
+#   MAP PIT     a miniature of the next raid's map seen from above through a glass cover; panels hovering
+#               over it (shoot them) change the map number
+#   RAID TERMINAL  the button that starts a raid on the map in the pit
 # Everything it changes goes through the profile (scripts/profile.gd) and is saved at once.
 # main.gd builds this instead of a raid when Main.show_start is true.
 
@@ -13,37 +14,44 @@ const Player = preload("res://scripts/player.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
 const Loot = preload("res://data/loot.gd")
 const Upgrades = preload("res://data/upgrades.gd")
+const Difficulty = preload("res://data/difficulty.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 
 const HALF_W := 9.0
 const HALF_D := 7.0
+# The map pit is a funnel: the walls slope down at 45 degrees from the opening in the floor to a smaller
+# viewing area at the bottom, so the whole map can be seen from above. A glass cover (the map station)
+# walks like floor.
+const PIT_DEPTH := 1.5
+const PIT_BOTTOM := Vector2(2.4, 1.8)  # the bottom (x, z in m)
+const PIT := PIT_BOTTOM + Vector2(2.0, 2.0) * PIT_DEPTH  # the opening in the floor: 45 degrees means 1 m out per 1 m down
+const PIT_MAP := Vector2(2.2, 1.6)  # the part of the pit floor the miniature may cover (m)
 const STATIONS := {
 	"raid": {"name": "RAID TERMINAL", "pos": Vector3(0, 0, -HALF_D + 1.0), "size": Vector3(3.0, 1.6, 0.8), "color": Color(0.2, 0.8, 0.3)},
 	"stash": {"name": "STASH", "pos": Vector3(0, 0, HALF_D - 1.0), "size": Vector3(2.6, 1.2, 1.0), "color": Color(0.35, 0.45, 0.75)},
 	"armory": {"name": "ARMORY", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
-	"map": {"name": "MAP TABLE", "pos": Vector3(0, 0, 0), "size": Vector3(3.6, 0.9, 2.6), "color": Color(0.4, 0.3, 0.2)},
+	"map": {"name": "MAP PIT", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
 }
-const TABLE_TOP := Vector2(3.0, 2.0)  # the part of the map table the miniature may cover (m)
-# Buttons on the front of the map table: shoot them (or press E close up) to change the map.
+# Panels hovering over the map pit, in view while looking at the map: shoot them (or press E close up) to change the map.
 const MAP_BUTTONS := {
-	"prev": {"label": "<", "name": "Previous map", "x": -0.95, "color": Color(0.8, 0.3, 0.25)},
+	"prev": {"label": "<", "name": "Previous map", "x": -0.6, "color": Color(0.8, 0.3, 0.25)},
 	"random": {"label": "?", "name": "Random map", "x": 0.0, "color": Color(0.85, 0.75, 0.2)},
-	"next": {"label": ">", "name": "Next map", "x": 0.95, "color": Color(0.3, 0.75, 0.35)},
+	"next": {"label": ">", "name": "Next map", "x": 0.6, "color": Color(0.3, 0.75, 0.35)},
 }
 
 var profile  # scripts/profile.gd instance, set by main before add_child
 var start_raid := Callable()  # called with the map seed when the player presses START RAID; set by main
 var preview_fn := Callable()  # seed -> the map as data (see Main.preview); set by main
 var selected_seed := 0  # the map the next raid will be played on
-var preview_data := {}  # what the table currently shows
+var preview_data := {}  # what the pit currently shows
 var player
 var open_station := ""  # which station panel is showing, "" if none
 
 var _prompt: Label
-var _preview: Node3D  # the miniature on the map table
+var _preview: Node3D  # the miniature in the map pit
 var _table_label: Label3D
 var _panel: PanelContainer
 var _title: Label
@@ -79,7 +87,20 @@ func _process(_d: float) -> void:
 func _build_room() -> void:
 	var floor_color := Color(0.32, 0.32, 0.36)
 	var wall_color := Color(0.5, 0.5, 0.55)
-	_box(Vector3(HALF_W * 2.0, 1, HALF_D * 2.0), Vector3(0, -0.5, 0), floor_color)
+	# The floor is four slabs around the map pit, and the pit has its own floor PIT_DEPTH down.
+	var strip := (HALF_D - PIT.y / 2.0)
+	var side := (HALF_W - PIT.x / 2.0)
+	var slab := PIT_DEPTH + 0.2  # thick enough that the pit's walls are solid all the way down
+	for s in [-1, 1]:
+		_box(Vector3(HALF_W * 2.0, slab, strip), Vector3(0, -slab / 2.0, s * (PIT.y / 2.0 + strip / 2.0)), floor_color)
+		_box(Vector3(side, slab, PIT.y), Vector3(s * (PIT.x / 2.0 + side / 2.0), -slab / 2.0, 0), floor_color)
+	_box(Vector3(PIT_BOTTOM.x, 1, PIT_BOTTOM.y), Vector3(0, -PIT_DEPTH - 0.5, 0), Color(0.28, 0.3, 0.28))
+	_add_pit_slopes()
+	var pit_light := OmniLight3D.new()  # lights the miniature below the floor
+	pit_light.position = Vector3(0, -0.6, 0)
+	pit_light.omni_range = 7.0
+	pit_light.light_energy = 1.2
+	add_child(pit_light)
 	_box(Vector3(HALF_W * 2.0, 0.5, HALF_D * 2.0), Vector3(0, 4.25, 0), wall_color)  # ceiling
 	for s in [-1, 1]:
 		_box(Vector3(HALF_W * 2.0 + 1.0, 4, 0.5), Vector3(0, 2, s * (HALF_D + 0.25)), wall_color)
@@ -97,6 +118,22 @@ func _build_room() -> void:
 	env.environment.ambient_light_color = Color(0.6, 0.6, 0.65)
 	add_child(env)
 
+# Four 45 degree slabs from the rim of the opening down to the edge of the pit floor. Each is a thin box
+# whose long side runs down the slope: tilted about X for the north and south walls, about Z for west and east.
+func _add_pit_slopes() -> void:
+	var slope_color := Color(0.5, 0.52, 0.58)
+	var length := PIT_DEPTH * sqrt(2.0)
+	var mid := (PIT.y + PIT_BOTTOM.y) / 4.0  # halfway between rim and bottom edge, from the centre
+	var mid_x := (PIT.x + PIT_BOTTOM.x) / 4.0
+	var north := _box(Vector3(PIT.x, 0.1, length), Vector3(0, -PIT_DEPTH / 2.0, -mid), slope_color)
+	north.rotation_degrees.x = 45.0
+	var south := _box(Vector3(PIT.x, 0.1, length), Vector3(0, -PIT_DEPTH / 2.0, mid), slope_color)
+	south.rotation_degrees.x = 135.0
+	var west := _box(Vector3(length, 0.1, PIT.y), Vector3(-mid_x, -PIT_DEPTH / 2.0, 0), slope_color)
+	west.rotation_degrees.z = -45.0
+	var east := _box(Vector3(length, 0.1, PIT.y), Vector3(mid_x, -PIT_DEPTH / 2.0, 0), slope_color)
+	east.rotation_degrees.z = -135.0
+
 func _box(size: Vector3, pos: Vector3, color: Color) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.position = pos
@@ -111,6 +148,9 @@ func _box(size: Vector3, pos: Vector3, color: Color) -> StaticBody3D:
 	mesh.mesh = bm
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
+	if color.a < 1.0:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mesh.material_override = mat
 	body.add_child(mesh)
 	add_child(body)
@@ -120,34 +160,35 @@ func _add_station(id: String) -> void:
 	var d: Dictionary = STATIONS[id]
 	var size: Vector3 = d["size"]
 	var pos: Vector3 = d["pos"]
-	var body := _box(size, Vector3(pos.x, size.y / 2.0, pos.z), d["color"])
+	var body := _box(size, Vector3(pos.x, float(d.get("y", size.y / 2.0)), pos.z), d["color"])
 	body.add_to_group("station")
 	body.set_meta("station_id", id)
 	var label := Label3D.new()
 	label.text = d["name"]
 	label.font_size = 48
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position = Vector3(0, size.y / 2.0 + (1.2 if id == "map" else 0.7), 0)  # above the miniature on the table
+	label.position = Vector3(0, 0.9, -0.6) if id == "map" else Vector3(0, size.y / 2.0 + 0.7, 0)  # the map's label floats over the pit, above the buttons
 	body.add_child(label)
 	if id == "map":
 		_table_label = label
 
 func _add_map_buttons() -> void:
-	var table: Dictionary = STATIONS["map"]
-	var front: float = float(table["pos"].z) + table["size"].z / 2.0
 	for id in MAP_BUTTONS:
 		var d: Dictionary = MAP_BUTTONS[id]
-		var body := _box(Vector3(0.6, 0.45, 0.16), Vector3(d["x"], 0.5, front + 0.08), d["color"])
+		var body := _box(Vector3(0.45, 0.45, 0.06), Vector3(d["x"], 0.3, -0.6), d["color"])
+		body.rotation_degrees.x = -35.0  # leans back so its face points up toward a player looking down at the map
+		body.collision_layer = 2  # shots and E reach it, but the player walks through it
+		body.collision_mask = 0
 		body.add_to_group("shootable")
 		body.set_meta("action", id)
 		var label := Label3D.new()
 		label.text = d["label"]
-		label.font_size = 140
-		label.outline_size = 16
-		label.position = Vector3(0, 0, 0.1)  # on the face toward the player
+		label.font_size = 90
+		label.outline_size = 8
+		label.position = Vector3(0, 0, 0.04)
 		body.add_child(label)
 
-# --- the map table ---
+# --- the map pit ---
 
 func _map_button(action: String) -> void:
 	match action:
@@ -158,11 +199,11 @@ func _map_button(action: String) -> void:
 	if open_station == "map":
 		_refresh()
 
-# Picks the map for the next raid and redraws the miniature on the table.
+# Picks the map for the next raid and redraws the miniature in the pit.
 func set_seed(map_seed: int) -> void:
 	selected_seed = maxi(map_seed, 0)
 	if _table_label != null:
-		_table_label.text = "MAP TABLE\nmap %d" % selected_seed
+		_table_label.text = "MAP PIT\nmap %d" % selected_seed
 	if _preview != null:
 		_preview.queue_free()
 		_preview = null
@@ -173,11 +214,11 @@ func set_seed(map_seed: int) -> void:
 	add_child(_preview)
 
 # The map as a scaled-down model: every wall and cover box, the green extract beam, the red enemy-base
-# beams and an orange dot at each patrol. The model is in map units, scaled to fit the table top.
+# beams and an orange dot at each patrol. The model is in map units, scaled to fit the pit floor.
 func _build_miniature(data: Dictionary) -> Node3D:
 	var root := Node3D.new()
-	root.scale = Vector3.ONE * minf(TABLE_TOP.x / float(data["w"]), TABLE_TOP.y / float(data["d"]))
-	root.position = Vector3(0, STATIONS["map"]["size"].y, 0)
+	root.scale = Vector3.ONE * minf(PIT_MAP.x / float(data["w"]), PIT_MAP.y / float(data["d"]))
+	root.position = Vector3(0, -PIT_DEPTH, 0)  # on the pit floor, seen from above through the glass
 	for b in data["blocks"]:
 		_mini_mesh(root, BoxMesh.new(), b[0], b[1], b[2])
 	_mini_marker(root, data["extract"], 3.0, 9.0, Color(0.2, 1, 0.3, 0.7))
@@ -218,7 +259,7 @@ func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var hint := Label.new()
-	hint.text = "BASE - WASD move, E or shoot (click) a station to use it, shoot the < ? > buttons on the map table to change the map, Esc closes a panel. Ammo is free here."
+	hint.text = "BASE - WASD move, E or shoot (click) a station to use it, shoot the < ? > panels hovering over the map pit to change the map, Esc closes a panel. Ammo is free here."
 	hint.position = Vector2(16, 12)
 	layer.add_child(hint)
 	_prompt = Label.new()
@@ -263,7 +304,7 @@ func _build_ui() -> void:
 	box.add_child(close)
 
 func _on_station_used(station: Node) -> void:
-	if station.has_meta("action"):  # a button on the map table, not a panel
+	if station.has_meta("action"):  # a pad by the map pit, not a panel
 		_map_button(station.get_meta("action"))
 		return
 	open_station = station.get_meta("station_id")
@@ -392,7 +433,7 @@ func _fill_map() -> void:
 	var d := preview_data
 	_label("%.0f x %.0f m   |   %d loot rooms   |   %d enemy bases   |   %d patrols   |   %d cover pieces" % [
 		d["w"], d["d"], d["rooms"], d["spawners"].size(), d["groups"].size(), d["cover"]])
-	_label("On the table: green beam = extraction, red beams = enemy bases, orange dots = patrols. Every map number is a different layout.")
+	_label("In the pit: green beam = extraction, red beams = enemy bases, orange dots = patrols. Every map number is a different layout.")
 	var row := HBoxContainer.new()
 	_content.add_child(row)
 	_button(row, "< Previous", _step_seed.bind(-1), selected_seed <= 0)
@@ -424,9 +465,23 @@ func _enter_seed(text: String) -> void:
 	_refresh()
 
 func _fill_raid() -> void:
-	_label("Map: %d (change it at the map table)" % selected_seed)
-	_label("Starting weapon: %s" % WeaponData.DATA[profile.equipped]["name"])
-	_label("Loot crates in the walled rooms, shoot down the enemy bases (red beams) to stop the spawns, and hold the green zone to extract. Die and you lose everything you carried.")
+	_label("Map: %d (change it at the map pit)    Starting weapon: %s" % [selected_seed, WeaponData.DATA[profile.equipped]["name"]])
+	_label("RAID DIFFICULTY   reward x%.2f" % profile.reward_mult(), 20)
+	_label("Harder options scale the loot you keep and the attribute points an extract earns. Easier ones shrink them.")
+	for id in Difficulty.OPTIONS:
+		var opt: Dictionary = Difficulty.OPTIONS[id]
+		_label("%s - %s" % [opt["name"], opt["desc"]])
+		var row := HBoxContainer.new()
+		_content.add_child(row)
+		for i in opt["levels"].size():
+			var level: Dictionary = opt["levels"][i]
+			var reward := float(level["reward"])
+			var text: String = level["label"] if reward == 0.0 else "%s (%+d%%)" % [level["label"], int(round(reward * 100.0))]
+			_button(row, text, _set_difficulty.bind(id, i), profile.difficulty_level(id) == i)
 	var b := _button(_content, "START RAID", _start)
 	b.custom_minimum_size = Vector2(0, 60)
 	b.grab_focus()  # Enter / Space also start the raid
+
+func _set_difficulty(id: String, level: int) -> void:
+	if profile.set_difficulty(id, level):
+		_commit()

@@ -11,6 +11,10 @@ const Tuning = preload("res://data/tuning.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 
 var group_id := 0
+var interval: float = Tuning.SPAWNER_INTERVAL  # seconds between spawns, max_alive defenders: set by the raid difficulty
+var max_alive: int = Tuning.SPAWNER_MAX_ALIVE
+var damage_mult := 1.0  # what its defenders get (see Enemy.apply_difficulty)
+var detect_seconds: float = Tuning.ENEMY_DETECT_SECONDS
 var rng_seed := 0  # set by main before add_child
 var health: int = Tuning.SPAWNER_HEALTH
 
@@ -28,7 +32,7 @@ func _notification(what: int) -> void:
 
 func _ready() -> void:
 	_rng.seed = rng_seed
-	_clock = _rng.randf() * Tuning.SPAWNER_INTERVAL * 0.5  # bases do not all pulse in step
+	_clock = _rng.randf() * interval * 0.5  # bases do not all pulse in step
 	add_to_group("spawner")
 	var size := Vector3(2, 1.5, 2)
 	var shape := CollisionShape3D.new()
@@ -88,19 +92,19 @@ func take_damage(amount: int) -> bool:
 
 # Seconds until this base spawns its next enemy. Stands still while its group is full.
 func time_left() -> float:
-	return Tuning.SPAWNER_INTERVAL - _clock
+	return interval - _clock
 
 func _update_beam() -> void:
-	var f := clampf(time_left() / Tuning.SPAWNER_INTERVAL, 0.02, 1.0)
+	var f := clampf(time_left() / interval, 0.02, 1.0)
 	_beam.scale = Vector3(BEAM_RADIUS * f, 1.0, BEAM_RADIUS * f)
 
 func _physics_process(delta: float) -> void:
 	var pack := get_tree().get_nodes_in_group("pack_%d" % group_id)
-	if pack.size() >= Tuning.SPAWNER_MAX_ALIVE:
+	if pack.size() >= max_alive:
 		return  # full: the countdown holds until a defender dies
 	_clock += delta
 	_update_beam()
-	if _clock < Tuning.SPAWNER_INTERVAL:
+	if _clock < interval:
 		return
 	_clock = 0.0
 	_update_beam()
@@ -110,6 +114,7 @@ func _physics_process(delta: float) -> void:
 	e.group_id = group_id
 	var a := _rng.randf() * TAU
 	e.position = global_position + Vector3(cos(a), 0, sin(a)) * 3.5
+	e.apply_difficulty(damage_mult, detect_seconds)
 	get_parent().add_child(e)
 	if pack.any(func(m): return m.alert):  # the group is already fighting: the newcomer joins in
 		e.set_alert(true)

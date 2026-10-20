@@ -7,6 +7,7 @@ const Tuning = preload("res://data/tuning.gd")
 const Loot = preload("res://data/loot.gd")
 const Upgrades = preload("res://data/upgrades.gd")
 const WeaponData = preload("res://data/weapons.gd")
+const Difficulty = preload("res://data/difficulty.gd")
 
 var path: String
 var totals := {}  # item id -> quantity in the stash
@@ -14,6 +15,7 @@ var weapons := {}  # weapon id -> upgrade level (missing = 0)
 var equipped := "pistol"  # the weapon held at the start of a raid
 var attrs := {}  # attribute id -> level (missing = 0)
 var points := 0  # unspent attribute points
+var difficulty := {}  # raid difficulty option id -> level index (missing = Normal); see data/difficulty.gd
 var stats := {"extracts": 0, "kills": 0}  # lifetime, successful raids only
 
 func _init(file_path: String = Tuning.PROFILE_PATH) -> void:
@@ -25,6 +27,7 @@ func load_from_disk() -> void:
 	equipped = "pistol"
 	attrs = {}
 	points = 0
+	difficulty = {}
 	stats = {"extracts": 0, "kills": 0}
 	if not FileAccess.file_exists(path):
 		return
@@ -52,6 +55,11 @@ func load_from_disk() -> void:
 			if Upgrades.ATTRS.has(str(id)):
 				attrs[str(id)] = clampi(int(a[id]), 0, int(Upgrades.ATTRS[str(id)]["max"]))
 	points = maxi(int(data.get("points", 0)), 0)
+	var dd = data.get("difficulty")
+	if typeof(dd) == TYPE_DICTIONARY:
+		for id in dd:
+			if Difficulty.OPTIONS.has(str(id)):
+				difficulty[str(id)] = Difficulty.level_of(dd, str(id))
 	var s = data.get("stats")
 	if typeof(s) == TYPE_DICTIONARY:
 		stats = {"extracts": int(s.get("extracts", 0)), "kills": int(s.get("kills", 0))}
@@ -60,10 +68,10 @@ func add_items(items: Dictionary) -> void:
 	for id in items:
 		totals[id] = totals.get(id, 0) + int(items[id])
 
-# A successful extract: bank the points it earned (see data/upgrades.gd) and the lifetime stats.
-# Returns the points gained.
-func record_extract(kills: int) -> int:
-	var gained: int = Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT
+# A successful extract: bank the points it earned (see data/upgrades.gd, scaled by the raid's reward
+# multiplier) and the lifetime stats. Returns the points gained.
+func record_extract(kills: int, reward_mult := 1.0) -> int:
+	var gained := Difficulty.scale(Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT, reward_mult)
 	points += gained
 	stats["extracts"] += 1
 	stats["kills"] += kills
@@ -107,6 +115,20 @@ func equip(id: String) -> bool:
 	equipped = id
 	return true
 
+# --- raid difficulty ---
+
+func difficulty_level(id: String) -> int:
+	return Difficulty.level_of(difficulty, id)
+
+func set_difficulty(id: String, level: int) -> bool:
+	if not Difficulty.OPTIONS.has(id) or level < 0 or level >= Difficulty.OPTIONS[id]["levels"].size():
+		return false
+	difficulty[id] = level
+	return true
+
+func reward_mult() -> float:
+	return Difficulty.reward_mult(difficulty)
+
 # --- attributes ---
 
 func attr_level(id: String) -> int:
@@ -140,6 +162,6 @@ func save() -> bool:
 		push_error("Cannot write profile to %s" % tmp)
 		return false
 	f.store_string(JSON.stringify({"version": 2, "totals": totals, "weapons": weapons, "equipped": equipped,
-		"attrs": attrs, "points": points, "stats": stats}, "\t"))
+		"attrs": attrs, "points": points, "difficulty": difficulty, "stats": stats}, "\t"))
 	f.close()
 	return DirAccess.rename_absolute(tmp, path) == OK

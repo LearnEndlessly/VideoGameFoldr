@@ -9,6 +9,7 @@ const WeaponData = preload("res://data/weapons.gd")
 const Recipes = preload("res://data/recipes.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
 const Pickup = preload("res://scripts/pickup.gd")
+const Difficulty = preload("res://data/difficulty.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -38,6 +39,8 @@ var seed_value := 0  # map seed, only logged; main may set it
 var map_info := {}  # the starting map as data, set by main; logged on the first line of the raid's log
 var shots := 0  # shots fired this raid
 var ammo_spent := 0
+var start_ammo: int = Tuning.STARTING_AMMO  # set by main from the raid difficulty
+var reward_mult := 1.0  # scales the loot kept and the points earned on an extract (data/difficulty.gd)
 var damage_mult := {}  # weapon id -> damage multiplier from the profile's weapon upgrades
 var reload_seconds: float = Tuning.RELOAD_SECONDS  # shortened by the Weapon handling attribute
 var loaded := {}  # weapon id -> rounds in its magazine; the backpack holds the rest
@@ -56,11 +59,11 @@ func setup(player) -> void:
 	_player = player
 	_drop_rng.seed = seed_value
 	player.died.connect(_on_player_died)
-	if Tuning.STARTING_AMMO > 0:
-		brought["ammo"] = Tuning.STARTING_AMMO - player.inventory.add("ammo", Tuning.STARTING_AMMO)
+	if start_ammo > 0:
+		brought["ammo"] = start_ammo - player.inventory.add("ammo", start_ammo)
 	for id in WeaponData.DATA:
 		loaded[id] = mini(WeaponData.DATA[id]["clip"], player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
-	Telemetry.start({"seed": seed_value, "start_ammo": Tuning.STARTING_AMMO, "threat_delay": threat_delay, "map": map_info})
+	Telemetry.start({"seed": seed_value, "start_ammo": start_ammo, "reward_mult": reward_mult, "threat_delay": threat_delay, "map": map_info})
 
 # Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
 # for the result; otherwise nothing changes. The result is announced like a pickup.
@@ -296,16 +299,19 @@ func _finish(outcome: String) -> void:
 	extracting = false
 	threat_active = false
 	var items := _loot()
+	if outcome == "extracted":  # the raid difficulty scales what is kept (what is lost stays as it was)
+		for id in items:
+			items[id] = Difficulty.scale(int(items[id]), reward_mult)
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
 	var points := 0  # attribute points earned (successful extracts only)
 	if outcome == "extracted" and profile != null:
 		profile.add_items(items)
-		points = profile.record_extract(_player.kills)
+		points = profile.record_extract(_player.kills, reward_mult)
 		saved = profile.save()
 	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
 		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached}
 	Telemetry.emit("raid.end.raid", end_info)
 	Telemetry.finish()
 	Telemetry.record_run(end_info)
-	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points})
+	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points, "reward_mult": reward_mult})

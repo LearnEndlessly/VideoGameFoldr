@@ -20,6 +20,7 @@ var health := 1
 var max_health := 1
 var alert := false
 var suspicion := 0.0  # 0..1; fills while the player is seen or heard, full = alert
+var detect_seconds: float = Tuning.ENEMY_DETECT_SECONDS  # raised or lowered by the raid difficulty
 var last_seen := Vector3.ZERO  # where the player was last seen or heard; a suspicious enemy looks and creeps here
 var converging := false          # the threat clock sent this enemy toward converge_target
 var converge_target := Vector3.ZERO
@@ -189,6 +190,11 @@ func end_converge() -> void:
 	home = global_position
 	_target = home
 
+# Raid difficulty (data/difficulty.gd): scale the damage this enemy deals and set its alarm time.
+func apply_difficulty(damage_mult: float, detect: float) -> void:
+	stats["damage"] = int(round(stats["damage"] * damage_mult))
+	detect_seconds = detect
+
 # One enemy noticing the player (or being shot) wakes its whole group.
 func alert_pack(cause: String = "sight") -> void:
 	if not alert:  # the first enemy to notice reports for the group
@@ -293,16 +299,16 @@ func _sees(player, dist: float) -> bool:
 	var in_cone := dist < Tuning.ENEMY_NEAR_SENSE or forward.normalized().dot(to_player.normalized()) >= cos_half
 	return in_cone and _has_line_of_sight(player)
 
-# Seen: the meter fills over ENEMY_DETECT_SECONDS (twice as fast when only heard); otherwise it drains.
+# Seen: the meter fills over detect_seconds (Tuning.ENEMY_DETECT_SECONDS unless the difficulty changes it) (twice as fast when only heard); otherwise it drains.
 # A full meter alerts the whole group.
 func _update_suspicion(player, dist: float, delta: float) -> void:
 	var gain := -1.0 / Tuning.ENEMY_DETECT_DECAY_SECONDS
 	var cause := "sight"
 	if player != null and _sees(player, dist):
-		gain = 1.0 / Tuning.ENEMY_DETECT_SECONDS
+		gain = 1.0 / detect_seconds
 		last_seen = player.global_position
 	elif player != null and _hears(player, dist):
-		gain = 2.0 / Tuning.ENEMY_DETECT_SECONDS
+		gain = 2.0 / detect_seconds
 		cause = "noise"
 		last_seen = player.global_position
 	suspicion = clampf(suspicion + gain * delta, 0.0, 1.0)

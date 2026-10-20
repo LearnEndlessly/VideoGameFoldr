@@ -19,6 +19,7 @@ const AmmoBar = preload("res://scripts/ammo_bar.gd")
 const Crosshair = preload("res://scripts/crosshair.gd")
 const Spawner = preload("res://scripts/spawner.gd")
 const Hub = preload("res://scripts/hub.gd")
+const Difficulty = preload("res://data/difficulty.gd")
 
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
@@ -130,6 +131,7 @@ func _build_raid() -> void:
 		_seed = int(args[0]) if args.size() > 0 else randi()
 	rng.seed = _seed
 	var zone := _build_map()
+	_apply_difficulty(Difficulty.values(profile.difficulty))
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
@@ -148,6 +150,8 @@ func _build_raid() -> void:
 	for id in WeaponData.DATA:
 		raid.damage_mult[id] = profile.damage_mult(id)
 	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
+	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"]
+	raid.reward_mult = profile.reward_mult()
 	raid.seed_value = _seed
 	raid.map_info = _map_info()
 	add_child(raid)
@@ -264,7 +268,7 @@ func _enemy_status() -> String:
 		return "Enemies left: %d   ALL ENEMY BASES DESTROYED" % alive
 	var soonest := INF
 	for b in bases:
-		if get_tree().get_nodes_in_group("pack_%d" % b.group_id).size() < Tuning.SPAWNER_MAX_ALIVE:
+		if get_tree().get_nodes_in_group("pack_%d" % b.group_id).size() < b.max_alive:
 			soonest = minf(soonest, b.time_left())
 	var timer := "%.0f s" % ceilf(soonest) if soonest < INF else "-"
 	return "Enemies left: %d\nEnemy bases: %d   Next respawn: %s" % [alive, bases.size(), timer]
@@ -353,6 +357,7 @@ func _on_raid_ended(result: Dictionary) -> void:
 	if extracted:
 		subtitle = "Your loot is stored in the base." if result["saved"] else "WARNING: your profile could not be saved."
 		subtitle += "  +%d attribute point(s): spend them at the Character station." % result["points"]
+		subtitle += "  Reward x%.2f." % result["reward_mult"]
 	subtitle += "  Enemies killed: %d." % result["kills"]
 	screen.show_screen("EXTRACTED" if extracted else "YOU DIED", subtitle,
 		"Kept this raid" if extracted else "Lost this raid", result["items"],
@@ -362,6 +367,38 @@ func _return_to_base() -> void:
 	show_start = true
 	get_tree().paused = false
 	get_tree().reload_current_scene.call_deferred()
+
+# Applies the raid difficulty (data/difficulty.gd) to the map just built. It changes how many enemies there
+# are and how they behave, never the terrain, so a map number is the same map on every difficulty.
+func _apply_difficulty(d: Dictionary) -> void:
+	var diff_rng := RandomNumberGenerator.new()  # its own stream, so the map's rng is untouched
+	diff_rng.seed = _seed + 1
+	var groups := {}
+	for c in get_children():
+		if "stats" in c:
+			groups[c.group_id] = groups.get(c.group_id, []) + [c]
+	for g in groups:
+		var members: Array = groups[g]
+		var want := maxi(1, int(round(members.size() * float(d["patrols"]))))
+		for i in range(want, members.size()):  # fewer: drop the extras
+			members[i].queue_free()
+		for i in range(members.size(), want):  # more: add newcomers at the patrol's home
+			var e := Enemy.new()
+			e.stats = Enemies.roll(diff_rng)
+			e.home = members[0].home
+			e.group_id = g
+			var spread: float = Tuning.GROUP_SPREAD
+			e.position = e.home + Vector3(diff_rng.randf_range(-spread, spread), 0, diff_rng.randf_range(-spread, spread))
+			add_child(e)
+			members.append(e)
+	for c in get_children():
+		if "stats" in c and not c.is_queued_for_deletion():
+			c.apply_difficulty(float(d["damage"]), float(d["awareness"]))
+	for sp in _spawners:
+		sp.interval = float(d["bases"]["interval"])
+		sp.max_alive = int(d["bases"]["max_alive"])
+		sp.damage_mult = float(d["damage"])
+		sp.detect_seconds = float(d["awareness"])
 
 # The map a seed makes, as data for the base's map table: builds the map's nodes off the scene tree,
 # reads them back, and frees them. The same seed gives the same map in the raid.

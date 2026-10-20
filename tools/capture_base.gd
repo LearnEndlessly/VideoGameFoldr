@@ -36,7 +36,8 @@ func _init() -> void:
 	await process_frame
 	await _frames(5)
 	var hub = main.get_children().filter(func(c): return "open_station" in c)[0]
-	hub.player._head.rotation.x = -0.3
+	hub.player.position = Vector3(0, 0.1, 4.0)
+	hub.player._head.rotation.x = -0.5
 	hub.set_seed(5)
 	await _shot("b1_base")
 	for id in ["map", "stash", "armory", "character", "raid"]:
