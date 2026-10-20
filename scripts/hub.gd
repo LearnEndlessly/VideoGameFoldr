@@ -297,35 +297,36 @@ func map_info_rows() -> Array:
 	return [["SIZE", "%.0fx%.0f" % [d["w"], d["d"]]], ["LOOT ROOMS", str(d["rooms"])], ["ENEMY BASES", str(d["spawners"].size())],
 		["PATROLS", str(d["groups"].size())], ["COVER", str(d["cover"])]]
 
-# A low display wrapped around the far edge of the map: a strip along the back rim with the map number and its
-# numbers, and a wing angled toward the player at each end holding the colour key. All tilted to face upward.
+# The map's information, recessed into the pit: a plate lying on the far 45 degree wall just below the rim, facing
+# up and toward the player. The top row has the map number and its numbers, the bottom row the colour key.
 func _add_map_display() -> void:
 	var accent := Color(0.7, 0.85, 1.0)
-	var back := _display_board(Vector3(0, 0.3, -PIT.y / 2.0 - 0.17), Vector3(-30, 0, 0), Vector2(PIT.x, 0.6), accent)
-	_map_title = _display_label(back, "", -2.0, 0.0, 44, accent)
+	var down := Vector3(0, -1, 1).normalized()  # down the far wall
+	var normal := Vector3(0, 1, 1).normalized()  # out of the far wall, into the pit
+	# The pit narrows as it goes down (45 degree walls on every side), so the plate is only as wide as the wall is where it ends.
+	var board := _display_board(Vector3(0, 0, -PIT.y / 2.0) + down * 1.02 + normal * 0.06, Vector3(-45, 0, 0), Vector2(3.3, 0.8), accent)
+	_map_title = _display_label(board, "", 0.0, 0.28, 40, accent)
 	_map_title.font = UIKit.bold()
-	for i in 5:  # clear of the buttons that hover in front of the middle
-		var x: float = [-1.15, 1.0, 1.5, 1.95, 2.4][i]
-		_map_values.append(_display_label(back, "", x, 0.1, 34, Color.WHITE))
+	for i in 5:
+		var x := -1.24 + i * 0.62
+		_map_values.append(_display_label(board, "", x, 0.04, 32, Color.WHITE))
 		_map_values[i].font = UIKit.bold()
-		_map_captions.append(_display_label(back, "", x, -0.14, 14, UIKit.DIM))
-	var legends := [[-PIT.x / 2.0 - 0.7, 40.0, [["SAFE EXTRACT", Color(0.2, 1, 0.3)], ["FAST EXTRACT", Color(1, 0.6, 0.1)]]],
-		[PIT.x / 2.0 + 0.7, -40.0, [["ENEMY BASE", Color(1, 0.15, 0.1)], ["PATROL", Color(1, 0.6, 0.1)]]]]
-	for w in legends:
-		var wing := _display_board(Vector3(w[0], 0.3, -PIT.y / 2.0 + 0.1), Vector3(-30, w[1], 0), Vector2(1.5, 0.6), accent)
-		for i in 2:
-			var swatch := MeshInstance3D.new()
-			var bm := BoxMesh.new()
-			bm.size = Vector3(0.1, 0.1, 0.01)
-			swatch.mesh = bm
-			swatch.position = Vector3(-0.62, 0.12 - i * 0.24, 0.045)
-			var m := StandardMaterial3D.new()
-			m.albedo_color = w[2][i][1]
-			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			swatch.material_override = m
-			wing.add_child(swatch)
-			var l := _display_label(wing, w[2][i][0], -0.5, 0.12 - i * 0.24, 22, UIKit.DIM)
-			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		_map_captions.append(_display_label(board, "", x, -0.1, 13, UIKit.DIM))
+	var key := [["SAFE EXTRACT", Color(0.2, 1, 0.3)], ["FAST EXTRACT", Color(1, 0.6, 0.1)], ["ENEMY BASE", Color(1, 0.15, 0.1)], ["PATROL", Color(1, 0.6, 0.1)]]
+	for i in key.size():
+		var x := -1.55 + i * 0.85
+		var swatch := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.09, 0.09, 0.01)
+		swatch.mesh = bm
+		swatch.position = Vector3(x, -0.3, 0.045)
+		var m := StandardMaterial3D.new()
+		m.albedo_color = key[i][1]
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		swatch.material_override = m
+		board.add_child(swatch)
+		var l := _display_label(board, key[i][0], x + 0.08, -0.3, 15, UIKit.DIM)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 # A dark plate with a coloured frame, at `pos` turned by `rot` degrees; returns the node to put labels on.
 func _display_board(pos: Vector3, rot: Vector3, size: Vector2, accent: Color) -> Node3D:
