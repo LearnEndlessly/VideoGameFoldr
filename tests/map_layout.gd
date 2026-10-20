@@ -115,7 +115,9 @@ func _check_walkable(s: int, main) -> void:
 				seen[ni] = 1
 				queue.append(ni)
 
-	var targets := {"extract zone": main.extract_pos}
+	var targets := {}
+	for z in main.extract_zones:
+		targets["extract zone %s" % z["id"]] = z["pos"]
 	for st in main.structures:
 		var inward: Vector3 = (st["center"] - st["door"]).normalized()  # a crate can sit at the centre, so aim just inside the door
 		targets["%s door" % st["id"]] = st["door"]

@@ -82,8 +82,27 @@ const SPRINT_NOISE_RANGE := 14.0
 const GUARDED_ZONE := "armory"
 const GUARD_DISTANCE := 8.0
 
-# Seconds the player must stand inside the extract zone. Leaving resets the timer.
+# Extraction. Every map has two zones (placed by their own RNG stream, so they never move anything else):
+#   A "Safe route": far from the start, EXTRACT_HOLD_SECONDS to hold.
+#   B "Fast route": close to the start, EXTRACT_B_HOLD_SECONDS to hold, and noisy: when a player starts
+#     holding in it, every enemy group with a member within EXTRACT_B_NOISE_RADIUS m of the zone is alerted.
+# Leaving a zone resets its timer. Distances along the ground ("path") are walking distance from the
+# player's start around walls and cover, measured on a 1 m grid (4-connected, so slightly more than a
+# straight line on diagonals). Separations are straight-line metres.
 const EXTRACT_HOLD_SECONDS := 8.0
+const EXTRACT_B_HOLD_SECONDS := 12.0
+const EXTRACT_B_NOISE_RADIUS := 30.0
+const EXTRACT_A_MIN_PATH := 32.0  # A is at least this far (path) from the start
+const EXTRACT_B_MIN_PATH := 8.0  # B is between these two path distances from the start
+const EXTRACT_B_MAX_PATH := 18.0
+const EXTRACT_MIN_SEPARATION := 35.0  # A and B are at least this far apart
+const EXTRACT_MIN_BASE_DISTANCE := 10.0  # both zones are at least this far from every enemy base
+const EXTRACT_ZONE_SIZE := 6.0  # width and depth of a zone (m)
+const EXTRACT_OPEN_RADIUS := 2  # a zone needs this many metres of walkable space around its centre (no wall, cover or crate), so a player can stand in it
+# Placement draws from the extract stream: up to EXTRACT_PLACE_TRIES points per zone, and if no pair
+# works the whole pair is redrawn up to EXTRACT_PAIR_RETRIES times. Then it logs an error and falls back.
+const EXTRACT_PLACE_TRIES := 300
+const EXTRACT_PAIR_RETRIES := 5
 # Metres from the player to a crate for a loot request to be accepted.
 const LOOT_REACH := 4.0
 # Master volume for all sound effects, in dB (0 = full, -6 = about half, -80 = silent).

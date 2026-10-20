@@ -22,6 +22,7 @@ var result := {}
 var first_alert := -1.0
 var crates_opened := 0
 var used_shelter := false
+var chosen_extract := ""  # "A" or "B": the zone the bot headed for
 
 var _waypoints: Array = []  # {"pos": Vector3, "crate": node (optional), "extract": true (optional)}
 var _stuck_pos := Vector3.ZERO
@@ -57,7 +58,8 @@ func _init() -> void:
 		"pickups": crates_opened, "first_alert": snappedf(first_alert, 0.1), "threat": raid._threat_reached,
 		"map": [main.half_w * 2.0, main.half_d * 2.0],
 		# where the bot ended up: a timeout with a big distance and waypoints left means it got stuck
-		"to_extract": snappedf(Vector2(player.global_position.x - main.extract_pos.x, player.global_position.z - main.extract_pos.z).length(), 0.1),
+		"extract": chosen_extract,
+			"to_extract": snappedf(Vector2(player.global_position.x - main.extract_pos.x, player.global_position.z - main.extract_pos.z).length(), 0.1),
 		"waypoints_left": _waypoints.size(), "safe": player.safe}))
 	quit()
 
@@ -74,7 +76,15 @@ func _plan() -> void:
 				_waypoints.append({"pos": c.global_position, "crate": c})
 		_waypoints.append({"pos": st["door"] - out * 1.5})
 		_waypoints.append({"pos": st["door"] + out * 3.0})
-	_waypoints.append({"pos": main.extract_pos, "extract": true})
+	_waypoints.append({"pos": main.extract_pos, "extract": true})  # resolved to the nearer zone when the bot gets there
+
+# The extract zone nearest the bot right now: "A" (safe route) or "B" (fast route).
+func _nearest_extract() -> Dictionary:
+	var best: Dictionary = main.extract_zones[0]
+	for z in main.extract_zones:
+		if player.global_position.distance_to(z["pos"]) < player.global_position.distance_to(best["pos"]):
+			best = z
+	return best
 
 func _step(delta: float) -> void:
 	var enemies: Array = get_nodes_in_group("enemy").filter(func(e): return not e.is_queued_for_deletion())
@@ -151,6 +161,12 @@ func _follow_waypoints(delta: float) -> void:
 			_waypoints.pop_front()
 			return
 	elif wp.has("extract"):
+		if not wp.has("zone"):  # choose when the bot sets out for it: the nearer zone
+			var z := _nearest_extract()
+			wp["zone"] = z["id"]
+			wp["pos"] = z["pos"]
+			chosen_extract = z["id"]
+			flat = Vector3(wp["pos"].x - player.global_position.x, 0, wp["pos"].z - player.global_position.z)
 		if flat.length() < 1.0:
 			return  # stand in the zone; the raid does the rest
 	elif flat.length() < 1.5:

@@ -221,7 +221,8 @@ func _build_miniature(data: Dictionary) -> Node3D:
 	root.position = Vector3(0, -PIT_DEPTH, 0)  # on the pit floor, seen from above through the glass
 	for b in data["blocks"]:
 		_mini_mesh(root, BoxMesh.new(), b[0], b[1], b[2])
-	_mini_marker(root, data["extract"], 3.0, 9.0, Color(0.2, 1, 0.3, 0.7))
+	for z in data["extracts"]:  # A (safe route) green, B (fast route) amber, like the beams in the raid
+		_mini_marker(root, z["pos"], 3.0, 9.0, Color(0.2, 1, 0.3, 0.7) if z["id"] == "A" else Color(1, 0.6, 0.1, 0.7))
 	for sp in data["spawners"]:
 		_mini_marker(root, sp, 1.6, 9.0, Color(1, 0.15, 0.1, 0.7))
 	for g in data["groups"]:
@@ -433,7 +434,7 @@ func _fill_map() -> void:
 	var d := preview_data
 	_label("%.0f x %.0f m   |   %d loot rooms   |   %d enemy bases   |   %d patrols   |   %d cover pieces" % [
 		d["w"], d["d"], d["rooms"], d["spawners"].size(), d["groups"].size(), d["cover"]])
-	_label("In the pit: green beam = extraction, red beams = enemy bases, orange dots = patrols. Every map number is a different layout.")
+	_label("In the pit: green beam = safe extraction, amber = fast extraction, red beams = enemy bases, orange dots = patrols. Every map number is a different layout.")
 	var row := HBoxContainer.new()
 	_content.add_child(row)
 	_button(row, "< Previous", _step_seed.bind(-1), selected_seed <= 0)

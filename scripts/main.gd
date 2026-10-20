@@ -21,6 +21,10 @@ const Spawner = preload("res://scripts/spawner.gd")
 const Hub = preload("res://scripts/hub.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
+const EXTRACT_ZONES := {
+	"A": {"name": "Safe route", "color": Color(0, 1, 0.2, 0.25)},
+	"B": {"name": "Fast route", "color": Color(1, 0.6, 0.1, 0.25)},
+}
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
 
@@ -36,7 +40,15 @@ var seed_override := -1  # tests set these before add_child
 var profile_path: String = OS.get_environment("VG_PROFILE") if OS.has_environment("VG_PROFILE") else Tuning.PROFILE_PATH
 var profile: Profile
 var raid: Raid
-var extract_pos := Vector3.ZERO
+var extract_pos := Vector3.ZERO  # zone A's position (the "safe route"); see extract_zones
+var extract_zones: Array = []  # [{"id": "A"|"B", "name", "pos", "color", "area", "beam", "label", "mat", "hold"}]
+var extract_errors: Array = []  # placement failures (should stay empty): a clear message each
+# Extract placement settings. They default to data/tuning.gd; a test changes entries before add_child to prove
+# that the extract tuning moves only the zones.
+var extract_cfg := {"a_min_path": Tuning.EXTRACT_A_MIN_PATH, "b_min_path": Tuning.EXTRACT_B_MIN_PATH,
+	"b_max_path": Tuning.EXTRACT_B_MAX_PATH, "min_separation": Tuning.EXTRACT_MIN_SEPARATION,
+	"min_base_distance": Tuning.EXTRACT_MIN_BASE_DISTANCE, "b_hold": Tuning.EXTRACT_B_HOLD_SECONDS,
+	"b_noise_radius": Tuning.EXTRACT_B_NOISE_RADIUS}
 var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
@@ -51,7 +63,7 @@ var _cover: Array = []  # centres of placed cover boxes
 var _guard_pos = null  # Vector3 home of the group guarding Tuning.GUARDED_ZONE, or null
 var _player: Player
 var _spawners: Array = []  # the enemy bases (Spawner); each is freed when destroyed
-var _zone_mat := StandardMaterial3D.new()
+var _legacy_pad := Vector3.ZERO  # where the old single extract zone used to go; still kept clear (see _reserve_legacy_extract_pad)
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
 var _hud: Label
 var _help: Label
@@ -84,8 +96,8 @@ func _build_hub() -> void:
 	add_child(hub)
 
 # Generates the whole map from rng (already seeded): floor, walls, extract zone, loot rooms, enemy groups,
-# enemy bases, shelters and cover. Returns the extract zone. Needs no scene tree, so preview() can run it.
-func _build_map() -> Area3D:
+# enemy bases, shelters and cover. Needs no scene tree, so preview() can run it.
+func _build_map() -> void:
 	_roll_map_size()
 	var wall_color := Color(0.4, 0.4, 0.45)
 	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
@@ -97,7 +109,7 @@ func _build_map() -> Area3D:
 	# small), then shelters with their screening cover, then general cover fills whatever
 	# space is left, skipping what doesn't fit with a walkable gap.
 	_taken.append([Vector3.ZERO, 2.5, 2.5])  # player start
-	var zone := _place_extract()
+	_reserve_legacy_extract_pad()
 	for id in LootZones.DATA:
 		_add_structure(id, LootZones.DATA[id])
 	for g in Tuning.ENEMY_GROUP_COUNT:
@@ -116,7 +128,7 @@ func _build_map() -> Area3D:
 	_place_shelters()
 	for i in COVER_ATTEMPTS:
 		_place_cover()
-	return zone
+	_place_extracts()  # last, and from its own RNG stream: nothing above depends on it
 
 func _build_raid() -> void:
 	get_tree().paused = false
@@ -130,7 +142,7 @@ func _build_raid() -> void:
 	else:
 		_seed = int(args[0]) if args.size() > 0 else randi()
 	rng.seed = _seed
-	var zone := _build_map()
+	_build_map()
 	_apply_difficulty(Difficulty.values(profile.difficulty))
 
 	var sun := DirectionalLight3D.new()
@@ -152,6 +164,10 @@ func _build_raid() -> void:
 	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
 	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"]
 	raid.reward_mult = profile.reward_mult()
+	raid.b_hold_seconds = float(extract_cfg["b_hold"])
+	raid.b_noise_radius = float(extract_cfg["b_noise_radius"])
+	for z in extract_zones:
+		raid.extract_points[z["id"]] = z["pos"]
 	raid.seed_value = _seed
 	raid.map_info = _map_info()
 	add_child(raid)
@@ -165,8 +181,9 @@ func _build_raid() -> void:
 	raid.shot_fired.connect(func(weapon_id: String): Sfx.play(WeaponData.DATA[weapon_id]["sound"]))
 	raid.dry_fire.connect(func(): Sfx.play("empty"))
 	raid.threat_started.connect(_on_threat_started)
-	zone.body_entered.connect(_on_zone_body.bind(true))
-	zone.body_exited.connect(_on_zone_body.bind(false))
+	for z in extract_zones:
+		z["area"].body_entered.connect(_on_zone_body.bind(true, z["id"]))
+		z["area"].body_exited.connect(_on_zone_body.bind(false, z["id"]))
 
 	var layer := CanvasLayer.new()
 	_hud = Label.new()
@@ -297,11 +314,12 @@ func _process(_d: float) -> void:
 		return
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
-	var hold := raid.hold_seconds
+	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
 	_update_status_hud()
 	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _enemy_status()]
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Hold the green zone for %.0f s to extract." % hold
-	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
+	for z in extract_zones:
+		z["mat"].albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting and raid.extract_zone == z["id"] else z["color"]
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
 	if second != _last_tick:
@@ -309,7 +327,7 @@ func _process(_d: float) -> void:
 		if second >= 0:
 			Sfx.play("extract_tick")
 	if raid.extracting:
-		_extract_label.text = "EXTRACTING  %.1f s" % maxf(hold - raid.extract_elapsed, 0.0)
+		_extract_label.text = "EXTRACTING (%s)  %.1f s" % [EXTRACT_ZONES[raid.extract_zone]["name"], maxf(hold - raid.extract_elapsed, 0.0)]
 		_extract_bar.max_value = hold
 		_extract_bar.value = raid.extract_elapsed
 
@@ -335,11 +353,11 @@ func _feed_row(id: String, text: String) -> void:
 	_feed.add_child(row)
 	get_tree().create_timer(3.0).timeout.connect(row.queue_free)
 
-func _on_zone_body(body: Node3D, inside: bool) -> void:
+func _on_zone_body(body: Node3D, inside: bool, zone_id: String) -> void:
 	if body != _player:
 		return
 	if inside:
-		raid.request_extract()
+		raid.request_extract(zone_id)
 	else:
 		raid.cancel_extract()
 
@@ -410,7 +428,7 @@ func preview(map_seed: int) -> Dictionary:
 	for c in m.get_children():
 		if "stats" in c:
 			groups[c.home] = true
-	var data := {"w": m.half_w * 2.0, "d": m.half_d * 2.0, "blocks": m.blocks, "extract": m.extract_pos,
+	var data := {"w": m.half_w * 2.0, "d": m.half_d * 2.0, "blocks": m.blocks, "extract": m.extract_pos, "extracts": m.extract_zones.map(func(z): return {"id": z["id"], "pos": z["pos"]}),
 		"spawners": m._spawners.map(func(sp): return sp.position), "groups": groups.keys(),
 		"rooms": m.structures.size(), "cover": m._cover.size()}
 	m.free()
@@ -439,7 +457,7 @@ func _map_info() -> Dictionary:
 			enemies.append({"id": c.stats["type"], "mod": c.stats["modifier"], "group": c.group_id, "pos": c.position})
 		elif c.is_in_group("lootable"):
 			crates.append({"zone": c.zone_id, "pos": c.position})
-	return {"w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "shelters": shelters,
+	return {"w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
 		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
 
 # An enemy base: a small footprint reserved like a group, far from the start. See scripts/spawner.gd.
@@ -672,39 +690,214 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
 			_add_box(size, pos, color)
 
-# The extract zone sits at one end of the map's long axis, so a long map means a long trip.
-func _place_extract() -> Area3D:
+# The old single extract zone sat at one end of the map's long axis. The zones are now placed by
+# _place_extracts, but this still makes the same two draws from the map's rng and keeps the same footprint
+# clear, so that every seed's terrain, crates and enemies stay exactly as they were before the extract work
+# (tests/layout_isolation.gd checks this). The cost is an empty 9 m patch at the old spot. Regenerating the
+# layout fixtures would let this go.
+func _reserve_legacy_extract_pad() -> void:
 	var side := -1.0 if rng.randf() < 0.5 else 1.0
 	var pos: Vector3
 	if half_w >= half_d:
 		pos = Vector3(side * (half_w - 5.0), 0, rng.randf_range(-(half_d - 6.0), half_d - 6.0))
 	else:
 		pos = Vector3(rng.randf_range(-(half_w - 6.0), half_w - 6.0), 0, side * (half_d - 5.0))
-	extract_pos = pos
+	_legacy_pad = pos
 	_taken.append([pos, 4.5, 4.5])
+
+# --- extract zones ---
+
+# Walking distance (m) from the player's start to every 1 m cell of the map, around walls, rooms, cover,
+# crates and bases (an obstacle is grown by half a body width). 4-connected, so a little longer than a
+# straight line on diagonals; cells that cannot be reached hold -1.
+func _walk_grid() -> Dictionary:
+	var cols := int(ceil(half_w * 2.0))
+	var rows := int(ceil(half_d * 2.0))
+	var blocked := PackedByteArray()
+	blocked.resize(cols * rows)
+	var obstacles: Array = solids.duplicate()
+	for c in get_children():
+		if "zone_id" in c:  # a crate; not in its group yet when the map is built off the scene tree
+			obstacles.append(Rect2(Vector2(c.position.x - 0.5, c.position.z - 0.5), Vector2(1, 1)))
+	for r in obstacles:
+		var g: Rect2 = r.grow(0.5)
+		var x0 := maxi(int(floor(g.position.x + half_w)), 0)
+		var x1 := mini(int(floor(g.end.x + half_w - 0.001)), cols - 1)
+		var z0 := maxi(int(floor(g.position.y + half_d)), 0)
+		var z1 := mini(int(floor(g.end.y + half_d - 0.001)), rows - 1)
+		for z in range(z0, z1 + 1):
+			for x in range(x0, x1 + 1):
+				blocked[z * cols + x] = 1
+	var dist := PackedInt32Array()
+	dist.resize(cols * rows)
+	dist.fill(-1)
+	var start := clampi(int(floor(half_w)), 0, cols - 1) + clampi(int(floor(half_d)), 0, rows - 1) * cols
+	dist[start] = 0
+	var queue: Array = [start]
+	var head := 0
+	while head < queue.size():
+		var cur: int = queue[head]
+		head += 1
+		var cx := cur % cols
+		var cz := cur / cols
+		for step in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
+			var nx: int = cx + step[0]
+			var nz: int = cz + step[1]
+			if nx < 0 or nz < 0 or nx >= cols or nz >= rows:
+				continue
+			var ni := nz * cols + nx
+			if dist[ni] < 0 and blocked[ni] == 0:
+				dist[ni] = dist[cur] + 1
+				queue.append(ni)
+	return {"dist": dist, "cols": cols, "rows": rows}
+
+func _walk_dist(grid: Dictionary, p: Vector3) -> int:
+	var x := int(floor(p.x + half_w))
+	var z := int(floor(p.z + half_d))
+	if x < 0 or z < 0 or x >= grid["cols"] or z >= grid["rows"]:
+		return -1
+	return grid["dist"][z * grid["cols"] + x]
+
+# True if `p` satisfies every placement constraint for zone `which` ("A" or "B"); a_pos is where A went.
+func _extract_ok(p: Vector3, which: String, a_pos: Vector3, grid: Dictionary) -> bool:
+	var d := _walk_dist(grid, p)
+	if d < 0:
+		return false
+	if which == "A":
+		if d < float(extract_cfg["a_min_path"]):
+			return false
+	else:
+		if d < float(extract_cfg["b_min_path"]) or d > float(extract_cfg["b_max_path"]):
+			return false
+		if Vector2(p.x - a_pos.x, p.z - a_pos.z).length() < float(extract_cfg["min_separation"]):
+			return false
+	for sp in _spawners:
+		if Vector2(p.x - sp.position.x, p.z - sp.position.z).length() < float(extract_cfg["min_base_distance"]):
+			return false
+	var reach: float = Tuning.EXTRACT_ZONE_SIZE / 2.0  # the whole zone stays inside the walls
+	if absf(p.x) > half_w - reach or absf(p.z) > half_d - reach:
+		return false
+	return _extract_open(p, grid)
+
+# True if every cell within EXTRACT_OPEN_RADIUS of p is walkable and reachable: room to stand in the zone.
+# (Cover may overlap the edges of the 6 m trigger box; the old extract spot kept 9 m clear, which left no
+# room for a zone close to the start.)
+func _extract_open(p: Vector3, grid: Dictionary) -> bool:
+	var r: int = Tuning.EXTRACT_OPEN_RADIUS
+	for dx in range(-r, r + 1):
+		for dz in range(-r, r + 1):
+			if _walk_dist(grid, p + Vector3(dx, 0, dz)) < 0:
+				return false
+	return true
+
+# The cells (indices into the walk grid) a zone could be in by walking distance alone. Drawing from these
+# instead of from the whole map keeps the retries few: far fewer draws are wasted on unreachable or wrong-distance spots.
+func _extract_cells(grid: Dictionary, which: String) -> Array:
+	var cells: Array = []
+	var dist: PackedInt32Array = grid["dist"]
+	for i in dist.size():
+		var d := dist[i]
+		if d < 0:
+			continue
+		if which == "A":
+			if d >= float(extract_cfg["a_min_path"]):
+				cells.append(i)
+		elif d >= float(extract_cfg["b_min_path"]) and d <= float(extract_cfg["b_max_path"]):
+			cells.append(i)
+	return cells
+
+# The next point from the extract stream that fits zone `which`, or null after EXTRACT_PLACE_TRIES draws.
+# Each draw picks a cell from `cells` and a spot inside it.
+func _draw_extract(ext: RandomNumberGenerator, which: String, a_pos: Vector3, grid: Dictionary, cells: Array):
+	if cells.is_empty():
+		return null
+	for i in Tuning.EXTRACT_PLACE_TRIES:
+		var idx: int = cells[ext.randi_range(0, cells.size() - 1)]
+		var p := Vector3((idx % int(grid["cols"])) + ext.randf() - half_w, 0, (idx / int(grid["cols"])) + ext.randf() - half_d)
+		if _extract_ok(p, which, a_pos, grid):
+			return p
+	return null
+
+# Places both zones from a stream of their own, derived from the map seed, so no other part of the map is
+# affected by how they are placed. If no pair satisfies the constraints after the bounded retries, it logs a
+# clear error and falls back: A at the old single-zone spot, B at the reachable cell whose path distance is
+# nearest the middle of B's window.
+func _place_extracts() -> void:
+	var ext := RandomNumberGenerator.new()
+	ext.seed = ("extract:%d" % rng.seed).hash()
+	var grid := _walk_grid()
+	var cells_a := _extract_cells(grid, "A")
+	var cells_b := _extract_cells(grid, "B")
+	var a = null
+	var b = null
+	for attempt in Tuning.EXTRACT_PAIR_RETRIES:
+		a = _draw_extract(ext, "A", Vector3.ZERO, grid, cells_a)
+		if a == null:
+			continue
+		b = _draw_extract(ext, "B", a, grid, cells_b)
+		if b != null:
+			break
+	if a == null or b == null:
+		var msg := "Extract placement failed for map %d: no %s satisfied the constraints after %d pairs of %d draws; using a fallback." % [
+			rng.seed, "zone A" if a == null else "zone B", Tuning.EXTRACT_PAIR_RETRIES, Tuning.EXTRACT_PLACE_TRIES]
+		push_error(msg)
+		extract_errors.append(msg)
+		if a == null:
+			a = _legacy_pad
+		if b == null:
+			b = _extract_fallback_b(grid)
+	extract_pos = a
+	_make_extract_zone("A", a)
+	_make_extract_zone("B", b)
+
+func _extract_fallback_b(grid: Dictionary) -> Vector3:
+	var mid := (float(extract_cfg["b_min_path"]) + float(extract_cfg["b_max_path"])) / 2.0
+	var best := Vector3.ZERO
+	var best_err := INF
+	var dist: PackedInt32Array = grid["dist"]
+	for i in dist.size():
+		if dist[i] >= 0 and absf(dist[i] - mid) < best_err:
+			best_err = absf(dist[i] - mid)
+			best = Vector3((i % int(grid["cols"])) + 0.5 - half_w, 0, (i / int(grid["cols"])) + 0.5 - half_d)
+	return best
+
+# One extract zone: a trigger box, a beam into the sky (the amber one for the noisy fast route) and a label
+# with what the player needs to know to choose it: the route and how long the hold is.
+func _make_extract_zone(id: String, pos: Vector3) -> void:
+	var def: Dictionary = EXTRACT_ZONES[id]
+	var size: float = Tuning.EXTRACT_ZONE_SIZE
+	var hold: float = Tuning.EXTRACT_HOLD_SECONDS if id == "A" else float(extract_cfg["b_hold"])
 	var area := Area3D.new()
 	area.position = pos + Vector3(0, 1.5, 0)
 	var shape := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = Vector3(6, 3, 6)
+	bs.size = Vector3(size, 3, size)
 	shape.shape = bs
 	area.add_child(shape)
 	var mesh := MeshInstance3D.new()
-	var bm := CylinderMesh.new()  # a beam into the sky, visible from anywhere on the map
-	bm.top_radius = 2.0
-	bm.bottom_radius = 3.0
+	var bm := CylinderMesh.new()  # a beam into the sky
+	bm.top_radius = size / 3.0
+	bm.bottom_radius = size / 2.0
 	bm.height = 300.0
 	mesh.mesh = bm
 	mesh.position.y = bm.height / 2.0 - 1.5  # base on the floor (area sits 1.5 up)
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_zone_mat.albedo_color = Color(0, 1, 0.2, 0.25)
-	_zone_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_zone_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_zone_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mesh.material_override = _zone_mat
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = def["color"]
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.material_override = mat
 	area.add_child(mesh)
+	var label := Label3D.new()
+	label.text = "%s\n%.0f s%s" % [str(def["name"]).to_upper(), hold, "" if id == "A" else " - noisy"]
+	label.font_size = 48
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position = Vector3(0, 3.0, 0)
+	area.add_child(label)
 	add_child(area)
-	return area
+	extract_zones.append({"id": id, "name": def["name"], "pos": pos, "color": def["color"], "area": area,
+		"beam": mesh, "label": label, "mat": mat, "hold": hold})
 
 func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
 	blocks.append([size, pos, color])

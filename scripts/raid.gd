@@ -27,6 +27,10 @@ var profile  # scripts/profile.gd instance, set by main before the raid starts
 var hold_seconds: float = Tuning.EXTRACT_HOLD_SECONDS  # tests shorten this
 var state := State.ACTIVE
 var extracting := false
+var extract_zone := ""  # "A" or "B": the zone the current hold is in
+var extract_points := {}  # zone id -> position; set by main
+var b_hold_seconds: float = Tuning.EXTRACT_B_HOLD_SECONDS  # main copies its extract_cfg here
+var b_noise_radius: float = Tuning.EXTRACT_B_NOISE_RADIUS
 var extract_elapsed := 0.0
 var brought := {}  # item id -> quantity of the starting kit not yet spent (never counts as loot)
 # Threat clock settings; tests change these per raid. See data/tuning.gd for what they mean.
@@ -187,20 +191,44 @@ func request_pickup(pickup) -> bool:
 		pickup.queue_free()
 	return true
 
-# The player is standing in the extract zone. Starts (or continues) the hold timer.
-func request_extract() -> bool:
+# Seconds the hold in a zone takes. hold_seconds is zone A's; B takes b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS
+# times as long, so a test that shortens hold_seconds shortens both.
+func hold_seconds_for(zone_id: String) -> float:
+	if zone_id == "B":
+		return hold_seconds * b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS
+	return hold_seconds
+
+# The player is standing in extract zone `zone_id`. Starts (or continues) the hold timer. Starting a hold in
+# zone B is loud: every enemy group with a member within b_noise_radius of the zone is alerted.
+func request_extract(zone_id := "A") -> bool:
 	if state != State.ACTIVE:
 		return false
 	if not extracting:
-		Telemetry.emit("player.begin.extract")
+		Telemetry.emit("player.begin.extract", {"zone": zone_id})
+		extract_zone = zone_id
+		extract_elapsed = 0.0
+		if zone_id == "B":
+			_alert_near(extract_points.get("B", _player.global_position))
 	extracting = true
 	return true
+
+# Alerts every enemy group that has a member within b_noise_radius (flat distance) of `pos`.
+func _alert_near(pos: Vector3) -> void:
+	var done := {}
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e.is_queued_for_deletion() or done.has(e.group_id):
+			continue
+		var d := Vector2(e.global_position.x - pos.x, e.global_position.z - pos.z).length()
+		if d <= b_noise_radius:
+			done[e.group_id] = true
+			e.alert_pack("extract")
 
 # The player left the extract zone. The timer starts over next time.
 func cancel_extract() -> void:
 	if extracting:
-		Telemetry.emit("player.cancel.extract", {"held": extract_elapsed})
+		Telemetry.emit("player.cancel.extract", {"held": extract_elapsed, "zone": extract_zone})
 	extracting = false
+	extract_zone = ""
 	extract_elapsed = 0.0
 
 func request_loot(crate) -> bool:
@@ -246,7 +274,7 @@ func _physics_process(delta: float) -> void:
 				_end_threat()
 	if extracting:
 		extract_elapsed += delta
-		if extract_elapsed >= hold_seconds:
+		if extract_elapsed >= hold_seconds_for(extract_zone):
 			_finish("extracted")
 
 # A snapshot of where the player is and what they hold, for studying routes and resource use.
@@ -297,6 +325,7 @@ func _finish(outcome: String) -> void:
 		return
 	state = State.ENDED
 	extracting = false
+	extract_zone = ""
 	threat_active = false
 	var items := _loot()
 	if outcome == "extracted":  # the raid difficulty scales what is kept (what is lost stays as it was)
