@@ -15,6 +15,8 @@ const LootZones = preload("res://data/loot_zones.gd")
 const Rng = preload("res://data/rng.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
+const AmmoBar = preload("res://scripts/ammo_bar.gd")
+const Crosshair = preload("res://scripts/crosshair.gd")
 
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
@@ -50,6 +52,12 @@ var _extract_label: Label
 var _extract_bar: ProgressBar
 var _banner: Label
 var _banner_time := 0.0
+var _hp_bar: ProgressBar
+var _stats_label: Label
+var _ammo_bar: Control
+var _ammo_label: Label
+var _cross: Control
+var _reload_tip: Label  # "R to reload" under the crosshair
 
 func _ready() -> void:
 	profile = Profile.new(profile_path)
@@ -137,7 +145,7 @@ func _build_raid() -> void:
 
 	var layer := CanvasLayer.new()
 	_hud = Label.new()
-	_hud.position = Vector2(16, 16)
+	_hud.position = Vector2(16, 62)
 	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # a narrow left column, clear of the extract bar in the middle
 	_hud.custom_minimum_size = Vector2(420, 0)
 	_help = Label.new()  # controls hint along the bottom edge, wrapped so it never runs off screen
@@ -156,11 +164,12 @@ func _build_raid() -> void:
 	var ui := InventoryUI.new()
 	layer.add_child(ui)
 	ui.setup(_player)
-	var cross := Label.new()
-	cross.text = "+"
-	cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	layer.add_child(cross)
+	_cross = Crosshair.new()
+	_cross.fov = _player._cam.fov
+	layer.add_child(_cross)
+	_cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_build_extract_hud(layer)
+	_build_status_hud(layer)
 	_banner = Label.new()
 	_banner.add_theme_font_size_override("font_size", 34)
 	_banner.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
@@ -189,15 +198,69 @@ func _build_extract_hud(layer: CanvasLayer) -> void:
 	_extract_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_extract_box.offset_top = 24
 
+# Top-left: health bar, kills and shots. Small ammo slots and the reload tip sit just under the crosshair.
+func _build_status_hud(layer: CanvasLayer) -> void:
+	var top := VBoxContainer.new()
+	_hp_bar = ProgressBar.new()
+	_hp_bar.custom_minimum_size = Vector2(260, 18)
+	_hp_bar.max_value = Player.MAX_HEALTH
+	_hp_bar.show_percentage = false  # the stats line already prints HP
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.85, 0.15, 0.15)
+	_hp_bar.add_theme_stylebox_override("fill", fill)
+	_stats_label = Label.new()
+	_stats_label.add_theme_font_size_override("font_size", 14)
+	top.add_child(_hp_bar)
+	top.add_child(_stats_label)
+	layer.add_child(top)
+	top.position = Vector2(16, 16)
+
+	var ammo := VBoxContainer.new()
+	_ammo_bar = AmmoBar.new()
+	_ammo_label = Label.new()
+	_ammo_label.add_theme_font_size_override("font_size", 14)
+	_ammo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ammo.add_child(_ammo_bar)
+	ammo.add_child(_ammo_label)
+	_reload_tip = Label.new()
+	_reload_tip.text = "R to reload"
+	_reload_tip.add_theme_font_size_override("font_size", 16)
+	_reload_tip.add_theme_color_override("font_color", Color(1, 0.9, 0.1))
+	_reload_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_reload_tip.visible = false
+	ammo.add_child(_reload_tip)
+	layer.add_child(ammo)
+	ammo.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	ammo.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	ammo.offset_top = 40  # clear of the weapon's crosshair circle
+
+func _update_status_hud() -> void:
+	var id: String = _player.weapon_id
+	var w: Dictionary = _player.weapon
+	var shown: int = raid.shown_rounds(id)
+	var held: int = _player.inventory.count(w["ammo_item"])
+	_hp_bar.value = _player.health
+	_stats_label.text = "HP %d   KILLS %d   SHOTS %d" % [_player.health, _player.kills, raid.shots]
+	_ammo_bar.total = w["clip"]
+	_ammo_bar.filled = shown
+	_cross.spread = w["spread"]
+	_reload_tip.visible = shown * 5 <= int(w["clip"]) and held > shown and raid.reload_weapon != id
+	var note := ""
+	if raid.reload_weapon == id:
+		note = "  RELOADING..."
+	elif held < w["ammo_per_shot"]:
+		note = "  NO AMMO"
+	_ammo_label.text = "%d / %d%s" % [shown, maxi(held - shown, 0), note]
+
 func _process(_d: float) -> void:
 	if raid == null:
 		return
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
-	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   %s %s\nLoot: %s\n%s" \
-		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text()]
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." % hold
+	_update_status_hud()
+	_hud.text = "%s %s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else ""]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." % hold
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -209,9 +272,6 @@ func _process(_d: float) -> void:
 		_extract_label.text = "EXTRACTING  %.1f s" % maxf(hold - raid.extract_elapsed, 0.0)
 		_extract_bar.max_value = hold
 		_extract_bar.value = raid.extract_elapsed
-
-func _loot_text() -> String:
-	return _player.inventory.summary()
 
 func _on_picked_up(id: String, qty: int) -> void:
 	Sfx.play("pickup")
@@ -518,11 +578,17 @@ func _place_extract() -> Area3D:
 	shape.shape = bs
 	area.add_child(shape)
 	var mesh := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = bs.size
+	var bm := CylinderMesh.new()  # a beam into the sky, visible from anywhere on the map
+	bm.top_radius = 2.0
+	bm.bottom_radius = 3.0
+	bm.height = 300.0
 	mesh.mesh = bm
+	mesh.position.y = bm.height / 2.0 - 1.5  # base on the floor (area sits 1.5 up)
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_zone_mat.albedo_color = Color(0, 1, 0.2, 0.25)
 	_zone_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_zone_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_zone_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mesh.material_override = _zone_mat
 	area.add_child(mesh)
 	add_child(area)

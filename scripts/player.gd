@@ -28,8 +28,7 @@ var _viewmodel: Node3D  # the current weapon's art model, if it has one
 var _step_dist := 0.0  # metres walked since the last footstep sound
 var _head: Node3D
 var _cam: Camera3D
-var _beam_near: MeshInstance3D
-var _beam_far: MeshInstance3D
+var _beam: MeshInstance3D
 var _marker: MeshInstance3D
 
 func _ready() -> void:
@@ -46,8 +45,7 @@ func _ready() -> void:
 	_show_viewmodel()
 	var line := BoxMesh.new()
 	line.size = Vector3(0.012, 0.012, 1)
-	_beam_near = _make_mesh(line, Color(0.2, 1, 0.3))
-	_beam_far = _make_mesh(line, Color(1, 0.6, 0.1))
+	_beam = _make_mesh(line, Color(0.2, 1, 0.3))
 	var dot := SphereMesh.new()
 	dot.radius = 0.07
 	dot.height = 0.14
@@ -103,6 +101,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_2:
 			select_weapon("scattergun")
 			Sfx.play("switch")
+		elif event.keycode == KEY_R and raid != null:
+			if raid.request_reload():
+				Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
@@ -134,11 +135,16 @@ func _physics_process(delta: float) -> void:
 	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		raid.request_fire(weapon_id, _cam.global_transform)  # the raid checks cooldown and ammo
+
+# The aim line follows the camera, so it updates every rendered frame (physics ticks lag the mouse).
+func _process(_delta: float) -> void:
 	_update_aim()
 
 func select_weapon(id: String) -> void:
 	weapon_id = id
 	weapon = WeaponData.DATA[id]
+	if raid != null:
+		raid.cancel_reload()  # switching weapons interrupts a reload
 	_show_viewmodel()
 
 # The weapon's optional art model (its "model" field in data/weapons.gd), held at the lower
@@ -159,12 +165,6 @@ func _show_viewmodel() -> void:
 func ammo_count() -> int:
 	return inventory.count(weapon["ammo_item"])
 
-func weapon_text() -> String:
-	var ammo := ammo_count()
-	return "%s  AMMO %d (uses %d)%s  %dx%d dmg  full to %dm, falls off to %dm  [1/2 switch]" % [
-		weapon["name"], ammo, weapon["ammo_per_shot"], "  [NO AMMO]" if ammo < weapon["ammo_per_shot"] else "",
-		weapon["damage"], weapon["pellets"], weapon["effective"], weapon["max"]]
-
 func _cast(dist: float) -> Dictionary:
 	return _cast_dir(-_cam.global_transform.basis.z, dist)
 
@@ -174,22 +174,27 @@ func _cast_dir(dir: Vector3, dist: float) -> Dictionary:
 	query.exclude = [get_rid()]
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
-# Aim line: green out to the weapon's effective range, orange through the falloff
-# zone, with a dot where the aim ray lands (green = full damage, orange = reduced).
+# Aim line, one colour by where it lands: green = full damage, orange = in the falloff band,
+# grey = nothing within the weapon's max range. The dot at the hit point matches.
 func _update_aim() -> void:
 	var on := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	var from := _cam.global_position
 	var dir := -_cam.global_transform.basis.z
-	var eff: float = weapon["effective"]
 	var hit := _cast_dir(dir, weapon["max"])
 	var d: float = weapon["max"] if hit.is_empty() else from.distance_to(hit["position"])
+	var color := aim_color(hit.is_empty(), d)
 	var muzzle := _cam.global_transform * Vector3(0.22, -0.18, -0.5)
-	_set_beam(_beam_near, muzzle, from + dir * minf(d, eff), on)
-	_set_beam(_beam_far, from + dir * eff, from + dir * d, on and d > eff)
+	_beam.material_override.albedo_color = color
+	_set_beam(_beam, muzzle, from + dir * d, on)
 	_marker.visible = on and not hit.is_empty()
 	if _marker.visible:
 		_marker.global_position = hit["position"]
-		_marker.material_override.albedo_color = Color(0.2, 1, 0.3) if d <= eff else Color(1, 0.6, 0.1)
+		_marker.material_override.albedo_color = color
+
+func aim_color(no_hit: bool, dist: float) -> Color:
+	if no_hit:
+		return Color(0.6, 0.6, 0.6)
+	return Color(0.2, 1, 0.3) if dist <= weapon["effective"] else Color(1, 0.6, 0.1)
 
 func _set_beam(beam: MeshInstance3D, a: Vector3, b: Vector3, show: bool) -> void:
 	var length := a.distance_to(b)

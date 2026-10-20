@@ -12,7 +12,9 @@ const Telemetry = preload("res://scripts/telemetry.gd")
 signal picked_up(id: String, qty: int)
 signal inventory_full
 signal shot_fired(weapon_id: String)
-signal dry_fire  # tried to fire with too little ammo
+signal dry_fire  # tried to fire with too little ammo in the magazine
+signal reload_started(weapon_id: String)
+signal reload_done(weapon_id: String)
 signal threat_started
 signal threat_ended  # wave mode only
 signal ended(result: Dictionary)  # {"outcome": "extracted"|"dead", "items": {id: qty}, "saved": bool}
@@ -35,6 +37,9 @@ var seed_value := 0  # map seed, only logged; main may set it
 var map_info := {}  # the starting map as data, set by main; logged on the first line of the raid's log
 var shots := 0  # shots fired this raid
 var ammo_spent := 0
+var loaded := {}  # weapon id -> rounds in its magazine; the backpack holds the rest
+var reload_weapon := ""  # weapon being reloaded, "" if none
+var reload_left := 0.0
 
 var _threat_reached := false
 var _player
@@ -48,6 +53,8 @@ func setup(player) -> void:
 	player.died.connect(_on_player_died)
 	if Tuning.STARTING_AMMO > 0:
 		brought["ammo"] = Tuning.STARTING_AMMO - player.inventory.add("ammo", Tuning.STARTING_AMMO)
+	for id in WeaponData.DATA:
+		loaded[id] = mini(WeaponData.DATA[id]["clip"], player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
 	Telemetry.start({"seed": seed_value, "start_ammo": Tuning.STARTING_AMMO, "threat_delay": threat_delay, "map": map_info})
 
 # Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
@@ -69,22 +76,52 @@ func request_craft(output: String) -> bool:
 	picked_up.emit(output, 1)
 	return true
 
+func loaded_rounds(weapon_id: String) -> int:
+	var w: Dictionary = WeaponData.DATA[weapon_id]
+	return mini(int(loaded[weapon_id]), _player.inventory.count(w["ammo_item"]))
+
+# Rounds the HUD shows in the magazine: while reloading they fill in one by one.
+func shown_rounds(weapon_id: String) -> int:
+	if reload_weapon != weapon_id:
+		return loaded_rounds(weapon_id)
+	var progress := 1.0 - reload_left / Tuning.RELOAD_SECONDS
+	return int(lerpf(loaded_rounds(weapon_id), _reload_target(weapon_id), progress))
+
+func _reload_target(weapon_id: String) -> int:
+	var w: Dictionary = WeaponData.DATA[weapon_id]
+	return mini(w["clip"], _player.inventory.count(w["ammo_item"]))
+
+# Start reloading the current weapon from the backpack. False if the magazine is full or
+# the backpack has nothing more to put in it.
+func request_reload() -> bool:
+	var id: String = _player.weapon_id
+	if state != State.ACTIVE or reload_weapon != "" or _reload_target(id) <= loaded_rounds(id):
+		return false
+	reload_weapon = id
+	reload_left = Tuning.RELOAD_SECONDS
+	reload_started.emit(id)
+	return true
+
+func cancel_reload() -> void:
+	reload_weapon = ""
+
 # The player pulled the trigger. Checks the raid state, the weapon's cooldown and the
 # backpack's ammo; if all allow it, spends the ammo and resolves every pellet against
 # the world. `aim` is the camera's transform. Returns true if a shot was fired.
 func request_fire(weapon_id: String, aim: Transform3D) -> bool:
-	if state != State.ACTIVE or _fire_cooldown > 0.0 or not WeaponData.DATA.has(weapon_id):
+	if state != State.ACTIVE or _fire_cooldown > 0.0 or reload_weapon != "" or not WeaponData.DATA.has(weapon_id):
 		return false
 	var w: Dictionary = WeaponData.DATA[weapon_id]
 	_fire_cooldown = w["cooldown"]  # also paces the dry-fire click
 	var item: String = w["ammo_item"]
 	var cost: int = w["ammo_per_shot"]
-	if not _player.inventory.remove(item, cost):
+	if loaded_rounds(weapon_id) < cost or not _player.inventory.remove(item, cost):
 		dry_fire.emit()
 		Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "dry", "hits": 0, "dmg": 0, "ammo_left": _player.inventory.count(item)})
 		return false
 	if brought.has(item):
 		brought[item] = maxi(int(brought[item]) - cost, 0)  # the kit is spent first
+	loaded[weapon_id] = int(loaded[weapon_id]) - cost
 	shots += 1
 	ammo_spent += cost
 	shot_fired.emit(weapon_id)
@@ -149,6 +186,13 @@ func _physics_process(delta: float) -> void:
 	if state != State.ACTIVE:
 		return
 	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
+	if reload_weapon != "":
+		reload_left -= delta
+		if reload_left <= 0.0:
+			var id := reload_weapon
+			loaded[id] = _reload_target(id)
+			reload_weapon = ""
+			reload_done.emit(id)
 	elapsed += delta
 	Telemetry.clock = elapsed
 	_sample_clock += delta

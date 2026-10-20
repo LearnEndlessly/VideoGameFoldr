@@ -36,6 +36,9 @@ const PATH_GAP := 3.0
 # as loot: only ammo beyond this amount can be kept on extract.
 const STARTING_AMMO := 12
 
+# Seconds a reload takes (the HUD refills the magazine slots over this time; no shooting meanwhile).
+const RELOAD_SECONDS := 1.5
+
 # Backpack size in slots (each slot holds one stack of one item).
 const BACKPACK_SLOTS := 8
 

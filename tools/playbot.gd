@@ -128,6 +128,8 @@ func _fight(target) -> void:
 	var aim: Vector3 = target.global_position + Vector3(0, 1.1 * float(target.stats["size"]), 0) - player._cam.global_position
 	player.rotation.y = atan2(-aim.x, -aim.z)  # the camera looks along the body's -Z
 	player._head.rotation.x = atan2(aim.y, Vector2(aim.x, aim.z).length())
+	if raid.loaded_rounds(want) < player.weapon["ammo_per_shot"]:
+		raid.request_reload()
 	raid.request_fire(player.weapon_id, player._cam.global_transform)
 
 func _use_medkit() -> void:

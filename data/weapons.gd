@@ -4,9 +4,10 @@
 # Art: "model" is an optional path to a .glb/.gltf/.tscn (e.g. "res://assets/weapons/pistol.glb") held at the
 # lower right of the view; "" shows nothing. Add "model_scale" (default 1.0) to correct its size.
 # Each shot spends ammo_per_shot of the backpack item ammo_item; with too little the weapon cannot fire.
+# "clip" is how many rounds the magazine holds; when it is empty the player reloads (R) from the backpack.
 const DATA := {
-	"pistol": {"name": "Pistol", "damage": 25, "pellets": 1, "spread": 0.0, "cooldown": 0.25, "effective": 25.0, "max": 60.0, "sound": "shoot_pistol", "ammo_item": "ammo", "ammo_per_shot": 1, "model": "res://assets/weapons/kenney_blaster_kit/blaster-k.glb", "model_scale": 0.6},
-	"scattergun": {"name": "Scattergun", "damage": 14, "pellets": 8, "spread": 0.07, "cooldown": 0.9, "effective": 10.0, "max": 24.0, "sound": "shoot_scatter", "ammo_item": "ammo", "ammo_per_shot": 2, "model": "res://assets/weapons/kenney_blaster_kit/blaster-a.glb", "model_scale": 0.6},
+	"pistol": {"name": "Pistol", "damage": 25, "pellets": 1, "spread": 0.0, "cooldown": 0.25, "effective": 25.0, "max": 60.0, "sound": "shoot_pistol", "ammo_item": "ammo", "ammo_per_shot": 1, "clip": 30, "model": "res://assets/weapons/kenney_blaster_kit/blaster-k.glb", "model_scale": 0.6},
+	"scattergun": {"name": "Scattergun", "damage": 14, "pellets": 8, "spread": 0.07, "cooldown": 0.9, "effective": 10.0, "max": 24.0, "sound": "shoot_scatter", "ammo_item": "ammo", "ammo_per_shot": 2, "clip": 30, "model": "res://assets/weapons/kenney_blaster_kit/blaster-a.glb", "model_scale": 0.6},
 }
 const FALLOFF_MIN := 0.3
 
