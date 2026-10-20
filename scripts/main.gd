@@ -9,11 +9,13 @@ const ScreenUI = preload("res://scripts/screen_ui.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Tuning = preload("res://data/tuning.gd")
+const Scenery = preload("res://data/scenery.gd")
+const LootZones = preload("res://data/loot_zones.gd")
+const Rng = preload("res://data/rng.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
 
-const COVER_COUNT := 25
-const CRATE_COUNT := 10
+const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
 const GROUP_COUNT := 5  # enemy groups, 3-4 members each
 
@@ -26,10 +28,16 @@ var profile_path := Tuning.PROFILE_PATH
 var profile: Profile
 var raid: Raid
 var extract_pos := Vector3.ZERO
+var half_w := 30.0  # half the map width (x) and depth (z), set per raid
+var half_d := 30.0
+var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
+var shelters: Array = []  # Vector3 centres of the safe nooks
+var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
 var _seed := 0
 var _last_tick := -1  # whole second of the extract timer last ticked
-var _taken: Array = []  # [position, radius] of everything placed, to avoid overlaps
+var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep walkable gaps
+var _cover: Array = []  # centres of placed cover boxes
 var _player: Player
 var _zone_mat := StandardMaterial3D.new()
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
@@ -65,25 +73,22 @@ func _build_raid() -> void:
 	_seed = seed_override if seed_override >= 0 else (int(args[0]) if args.size() > 0 else randi())
 	rng.seed = _seed
 
-	_add_box(Vector3(60, 1, 60), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
+	_roll_map_size()
+	var wall_color := Color(0.4, 0.4, 0.45)
+	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
 	for s in [-1, 1]:
-		_add_box(Vector3(62, 4, 1), Vector3(0, 2, s * 30.5), Color(0.4, 0.4, 0.45))
-		_add_box(Vector3(1, 4, 62), Vector3(s * 30.5, 2, 0), Color(0.4, 0.4, 0.45))
+		_add_box(Vector3(half_w * 2.0 + 2.0, 4, 1), Vector3(0, 2, s * (half_d + 0.5)), wall_color)
+		_add_box(Vector3(1, 4, half_d * 2.0 + 2.0), Vector3(s * (half_w + 0.5), 2, 0), wall_color)
 
+	# Order matters: the big fixed things go in first (they may overlap if the map is too
+	# small), then shelters with their screening cover, then general cover fills whatever
+	# space is left, skipping what doesn't fit with a walkable gap.
+	_taken.append([Vector3.ZERO, 2.5, 2.5])  # player start
 	var zone := _place_extract()
-	for i in SHELTER_COUNT:
-		_add_shelter(_free_spot(6.0, 8.0))
-	for i in COVER_COUNT:
-		var size := Vector3(rng.randf_range(2, 6), rng.randf_range(2, 3.5), rng.randf_range(2, 6))
-		var p := _free_spot(maxf(size.x, size.z) / 2.0 + 1.0, 6.0)
-		_add_box(size, p + Vector3(0, size.y / 2.0, 0), Color(0.5, 0.4, 0.3))
-	for i in CRATE_COUNT:
-		var c := Crate.new()
-		c.seed_value = rng.randi()
-		c.position = _free_spot(1.5, 3.0) + Vector3(0, 0.5, 0)
-		add_child(c)
+	for id in LootZones.DATA:
+		_add_structure(id, LootZones.DATA[id])
 	for g in GROUP_COUNT:
-		var center := _free_spot(4.0, Tuning.ENEMY_GROUP_MIN_ORIGIN)
+		var center: Vector3 = _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
 		for i in rng.randi_range(3, 4):
 			var e := Enemy.new()
 			e.stats = Enemies.roll(rng)
@@ -92,6 +97,9 @@ func _build_raid() -> void:
 			var spread: float = Tuning.GROUP_SPREAD
 			e.position = center + Vector3(rng.randf_range(-spread, spread), 0, rng.randf_range(-spread, spread))
 			add_child(e)
+	_place_shelters()
+	for i in COVER_ATTEMPTS:
+		_place_cover()
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
@@ -155,8 +163,8 @@ func _process(_d: float) -> void:
 	if raid == null:
 		return
 	var hold := raid.hold_seconds
-	_hud.text = "Seed %d   HP %d   Kills %d   %s\nLoot: %s\n%s\nWASD move, Shift sprint, Space jump, LMB shoot, E open crate, Tab backpack, Esc free mouse. Blue shelter = safe. Hold the green zone for %.0f s to extract." \
-		% [_seed, _player.health, _player.kills, "[SAFE]" if _player.safe else "", _loot_text(), _player.weapon_text(), hold]
+	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   Kills %d   %s\nLoot: %s\n%s\nWASD move, Shift sprint, Space jump, LMB shoot, E open crate, Tab backpack, Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
+		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, _player.kills, "[SAFE]" if _player.safe else "", _loot_text(), _player.weapon_text(), hold]
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -222,67 +230,193 @@ func _set_safe(body: Node3D, value: bool) -> void:
 	if body == _player:
 		_player.safe = value
 
-# Open-fronted hut (door toward +z). Standing inside makes the player invisible to enemies.
-func _add_shelter(pos: Vector3) -> void:
-	var wall := Color(0.35, 0.45, 0.7)
-	_add_box(Vector3(8, 2.5, 0.5), pos + Vector3(0, 1.25, -3.75), wall)
-	_add_box(Vector3(0.5, 2.5, 8), pos + Vector3(-3.75, 1.25, 0), wall)
-	_add_box(Vector3(0.5, 2.5, 8), pos + Vector3(3.75, 1.25, 0), wall)
-	var pad := MeshInstance3D.new()
-	var pm := BoxMesh.new()
-	pm.size = Vector3(7, 0.02, 7)
-	pad.mesh = pm
-	pad.position = pos + Vector3(0, 0.011, 0)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.4, 0.6, 1.0)
-	pad.material_override = mat
-	add_child(pad)
-	var label := Label3D.new()
-	label.text = "SHELTER"
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position = pos + Vector3(0, 3.2, 0)
-	add_child(label)
+# --- map generation -------------------------------------------------------------
+
+# Picks the map's width and depth: a fixed floor area split by a random aspect ratio,
+# so some maps are long and narrow, some wide, some near square.
+func _roll_map_size() -> void:
+	var aspect := exp(rng.randf_range(log(Tuning.MAP_ASPECT_MIN), log(Tuning.MAP_ASPECT_MAX)))
+	var w := clampf(sqrt(Tuning.MAP_AREA * aspect), Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	var d := clampf(Tuning.MAP_AREA / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	half_w = roundf(w) / 2.0
+	half_d = roundf(d) / 2.0
+
+# A random point where a footprint of half-size (hx, hz) stays PATH_GAP away from the outer wall.
+func _random_point(hx: float, hz: float) -> Vector3:
+	var rx := maxf(half_w - hx - Tuning.PATH_GAP, 0.0)
+	var rz := maxf(half_d - hz - Tuning.PATH_GAP, 0.0)
+	return Vector3(rng.randf_range(-rx, rx), 0, rng.randf_range(-rz, rz))
+
+# True if a footprint centred at p keeps PATH_GAP of walkable space from everything placed.
+func _is_clear(p: Vector3, hx: float, hz: float) -> bool:
+	for t in _taken:
+		if absf(p.x - t[0].x) < t[1] + hx + Tuning.PATH_GAP and absf(p.z - t[0].z) < t[2] + hz + Tuning.PATH_GAP:
+			return false
+	return true
+
+# Picks and reserves a spot for a footprint of half-size (hx, hz), at least min_origin
+# from the player's start. With overlap_ok == false it returns null if no clear spot
+# is found; otherwise, after SPAWN_TRIES valid samples it accepts overlap, but min_origin
+# is never relaxed.
+# shortcut: gives up after 1000 samples, so a min_origin near the map size could
+# still return a spot inside it; upgrade if min_origin is ever tuned that high.
+func _free_spot(hx: float, hz: float, min_origin: float, overlap_ok := true):
+	var p := Vector3.ZERO
+	var tries := 0
+	for i in 1000:
+		p = _random_point(hx, hz)
+		if p.length() < min_origin:
+			continue
+		tries += 1
+		if _is_clear(p, hx, hz):
+			_taken.append([p, hx, hz])
+			return p
+		if tries >= Tuning.SPAWN_TRIES:
+			break
+	if not overlap_ok:
+		return null
+	_taken.append([p, hx, hz])
+	return p
+
+# Rolls a cover box and places it: at a random clear spot, or exactly at `at` if given
+# and clear. Skipped (nothing placed) when it doesn't fit with a walkable gap.
+func _place_cover(at = null) -> void:
+	var type := Rng.pick(Scenery.COVER_TYPES, rng)
+	var t: Dictionary = Scenery.COVER_TYPES[type]
+	var xr: Array = t["x"]
+	var yr: Array = t["y"]
+	var zr: Array = t["z"]
+	var size := Vector3(rng.randf_range(xr[0], xr[1]), rng.randf_range(yr[0], yr[1]), rng.randf_range(zr[0], zr[1]))
+	if rng.randf() < 0.5:
+		size = Vector3(size.z, size.y, size.x)
+	var hx := size.x / 2.0
+	var hz := size.z / 2.0
+	var p = null
+	if at == null:
+		p = _free_spot(hx, hz, 6.0, false)
+	elif absf(at.x) <= half_w - hx - Tuning.PATH_GAP and absf(at.z) <= half_d - hz - Tuning.PATH_GAP \
+			and at.length() >= 6.0 and _is_clear(at, hx, hz):
+		p = at
+		_taken.append([p, hx, hz])
+	if p == null:
+		return
+	_cover.append(p)
+	_add_box(size, p + Vector3(0, size.y / 2.0, 0), t["color"])
+
+# Safe nooks: small, coloured like the cover, door facing a random way, with cover pieces
+# placed in front of the door so they are hard to spot from the open. They are placed
+# before the general cover so there is still room for them.
+func _place_shelters() -> void:
+	var half := Scenery.SHELTER_OUTER / 2.0 + 0.2
+	for i in SHELTER_COUNT:
+		var p: Vector3 = _free_spot(half, half, 8.0)
+		var door_side := rng.randi_range(0, 3)
+		_add_shelter(p, door_side)
+		var dist_range: Array = Scenery.SHELTER_SCREEN_DIST
+		for k in Scenery.SHELTER_SCREENS:
+			var dir := _side_normal(door_side).rotated(Vector3.UP, rng.randf_range(-0.9, 0.9))
+			_place_cover(p + dir * rng.randf_range(dist_range[0], dist_range[1]))
+
+func _add_shelter(pos: Vector3, door_side: int) -> void:
+	shelters.append(pos)
+	_add_room(pos, Scenery.SHELTER_OUTER, door_side, Scenery.SHELTER_DOOR_WIDTH,
+		Scenery.SHELTER_HEIGHT, Scenery.SHELTER_WALL, Scenery.SHELTER_COLOR)
+	var inner := Scenery.SHELTER_OUTER - Scenery.SHELTER_WALL * 2.0
 	var area := Area3D.new()
-	area.position = pos + Vector3(0, 1.5, 0)
+	area.position = pos + Vector3(0, 1.3, 0)
 	var shape := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = Vector3(7, 3, 7)
+	bs.size = Vector3(inner - 0.2, 2.6, inner - 0.2)
 	shape.shape = bs
 	area.add_child(shape)
 	area.body_entered.connect(_set_safe.bind(true))
 	area.body_exited.connect(_set_safe.bind(false))
 	add_child(area)
 
-# Picks a spot clear of everything placed so far. The map is crowded by the time
-# enemies are placed, so after SPAWN_TRIES valid samples overlap is accepted, but
-# min_origin (distance from the player's start) is never relaxed.
-# shortcut: gives up after 1000 samples, so a min_origin near the map size could
-# still return a spot inside it; upgrade if min_origin is ever tuned that high.
-func _free_spot(radius: float, min_origin: float) -> Vector3:
-	var p := Vector3.ZERO
-	var tries := 0
-	for i in 1000:
-		p = Vector3(rng.randf_range(-26, 26), 0, rng.randf_range(-26, 26))
-		if p.length() < min_origin:
-			continue
-		tries += 1
-		if tries >= Tuning.SPAWN_TRIES or _is_clear(p, radius):
-			break
-	_taken.append([p, radius])
-	return p
+# One of the loot areas: a walled compound with a door and crates inside that roll
+# from the area's own loot pool and quantity (data/loot_zones.gd).
+func _add_structure(id: String, zone: Dictionary) -> void:
+	var size: float = zone["size"]
+	var half := size / 2.0 + 0.3
+	var center: Vector3 = _free_spot(half, half, 10.0)
+	var door_side := rng.randi_range(0, 3)
+	_add_room(center, size, door_side, 4.0, 2.8, 0.5, zone["wall_color"])
+	var floor_mark := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(size - 1.0, 0.02, size - 1.0)
+	floor_mark.mesh = fm
+	floor_mark.position = center + Vector3(0, 0.011, 0)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = (zone["wall_color"] as Color).lerp(Color(0.3, 0.5, 0.3), 0.5)
+	floor_mark.material_override = mat
+	add_child(floor_mark)
+	var label := Label3D.new()
+	label.text = zone["name"]
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.font_size = 64
+	label.position = center + Vector3(0, 4.5, 0)
+	add_child(label)
 
-func _is_clear(p: Vector3, radius: float) -> bool:
-	for t in _taken:
-		if p.distance_to(t[0]) < t[1] + radius:
-			return false
-	return true
+	# Crates: inside the walls, apart from each other and away from the doorway.
+	var door_point := center + _side_normal(door_side) * (size / 2.0)
+	var inner := size / 2.0 - 0.5 - 1.2
+	var spots: Array = []
+	var crate_range: Array = zone["crates"]
+	for i in rng.randi_range(crate_range[0], crate_range[1]):
+		for attempt in 40:
+			var p := center + Vector3(rng.randf_range(-inner, inner), 0.5, rng.randf_range(-inner, inner))
+			if p.distance_to(door_point) < 2.5:
+				continue
+			var ok := true
+			for s in spots:
+				if p.distance_to(s) < 2.0:
+					ok = false
+					break
+			if ok:
+				spots.append(p)
+				break
+	for p in spots:
+		var c := Crate.new()
+		c.seed_value = rng.randi()
+		c.pool = zone["pool"]
+		c.qty_mult = zone["qty_mult"]
+		c.rolls = zone["rolls"]
+		c.color = zone["crate_color"]
+		c.position = p
+		add_child(c)
+	structures.append({"id": id, "center": center, "size": size, "door": door_point,
+		"rect": Rect2(Vector2(center.x - size / 2.0, center.z - size / 2.0), Vector2(size, size))})
 
-# Builds the extract zone and returns its Area3D; the caller wires it to the raid.
+# Sides: 0 = +z, 1 = -z, 2 = +x, 3 = -x.
+func _side_normal(side: int) -> Vector3:
+	return [Vector3(0, 0, 1), Vector3(0, 0, -1), Vector3(1, 0, 0), Vector3(-1, 0, 0)][side]
+
+# Four walls around a square with a doorway cut into one side (door_side -1 = no door).
+func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
+		height: float, thick: float, color: Color) -> void:
+	for side in 4:
+		var n := _side_normal(side)
+		var along := Vector3(1, 0, 0) if side < 2 else Vector3(0, 0, 1)
+		var segments := [[-outer / 2.0, outer / 2.0]]
+		if side == door_side:
+			segments = [[-outer / 2.0, -door_w / 2.0], [door_w / 2.0, outer / 2.0]]
+		for seg in segments:
+			var length: float = seg[1] - seg[0]
+			var mid: float = (seg[0] + seg[1]) / 2.0
+			var size := Vector3(length, height, thick) if side < 2 else Vector3(thick, height, length)
+			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
+			_add_box(size, pos, color)
+
+# The extract zone sits at one end of the map's long axis, so a long map means a long trip.
 func _place_extract() -> Area3D:
 	var side := -1.0 if rng.randf() < 0.5 else 1.0
-	var pos := Vector3(side * 25.0, 0, rng.randf_range(-25, 25))
+	var pos: Vector3
+	if half_w >= half_d:
+		pos = Vector3(side * (half_w - 5.0), 0, rng.randf_range(-(half_d - 6.0), half_d - 6.0))
+	else:
+		pos = Vector3(rng.randf_range(-(half_w - 6.0), half_w - 6.0), 0, side * (half_d - 5.0))
 	extract_pos = pos
-	_taken.append([pos, 5.0])
+	_taken.append([pos, 4.5, 4.5])
 	var area := Area3D.new()
 	area.position = pos + Vector3(0, 1.5, 0)
 	var shape := CollisionShape3D.new()
@@ -302,6 +436,8 @@ func _place_extract() -> Area3D:
 	return area
 
 func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
+	if pos.y > 0.0:  # everything above the floor blocks walking
+		solids.append(Rect2(Vector2(pos.x - size.x / 2.0, pos.z - size.z / 2.0), Vector2(size.x, size.z)))
 	var body := StaticBody3D.new()
 	body.position = pos
 	var col := CollisionShape3D.new()

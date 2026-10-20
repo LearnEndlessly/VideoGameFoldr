@@ -15,7 +15,7 @@ const DATA := {
 	"hurt": {"freq": 120.0, "freq_end": 60.0, "duration": 0.2, "noise": 0.6, "wave": "sine", "decay": 2.0, "volume": 0.6, "min_gap": 0.15},
 	"enemy_strike": {"freq": 250.0, "freq_end": 80.0, "duration": 0.18, "noise": 0.5, "wave": "square", "decay": 2.5, "volume": 0.6, "min_gap": 0.1, "positional": true},
 	"step_player": {"freq": 140.0, "freq_end": 70.0, "duration": 0.07, "noise": 0.35, "wave": "sine", "decay": 2.5, "volume": 0.3, "min_gap": 0.0},
-	"step_enemy": {"freq": 90.0, "freq_end": 55.0, "duration": 0.1, "noise": 0.2, "wave": "square", "decay": 2.0, "volume": 0.45, "min_gap": 0.0, "positional": true, "max_distance": 25.0},
+	"step_enemy": {"freq": 90.0, "freq_end": 55.0, "duration": 0.1, "noise": 0.2, "wave": "square", "decay": 2.0, "volume": 0.45, "min_gap": 0.0, "positional": true, "max_distance": 40.0},
 	"pickup": {"freq": 700.0, "freq_end": 1100.0, "duration": 0.1, "noise": 0.0, "wave": "sine", "decay": 1.5, "volume": 0.4, "min_gap": 0.05},
 	"heal": {"freq": 500.0, "freq_end": 900.0, "duration": 0.25, "noise": 0.0, "wave": "sine", "decay": 1.2, "volume": 0.4, "min_gap": 0.1},
 	"deny": {"freq": 150.0, "freq_end": 150.0, "duration": 0.15, "noise": 0.0, "wave": "square", "decay": 1.5, "volume": 0.3, "min_gap": 0.3},

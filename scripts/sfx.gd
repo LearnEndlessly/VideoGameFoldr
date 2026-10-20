@@ -24,6 +24,8 @@ static func play(sound: String, pos = null, pitch := 1.0) -> void:
 		var p3 := AudioStreamPlayer3D.new()
 		p3.position = pos
 		p3.max_distance = def.get("max_distance", 60.0)
+		p3.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		p3.unit_size = Tuning.SOUND_UNIT_SIZE
 		p3.pitch_scale = pitch
 		p3.stream = stream_for(sound)
 		p3.volume_db = Tuning.SFX_VOLUME_DB

@@ -10,7 +10,9 @@ const ITEMS := {
 	"repair_kit": {"weight": 8, "min": 1, "max": 1, "stack": 3, "shape": "diamond", "color": Color(0.3, 0.6, 1.0)},
 }
 
-# Returns [item_id, quantity].
-static func roll(rng: RandomNumberGenerator) -> Array:
-	var id := Rng.pick(ITEMS, rng)
-	return [id, rng.randi_range(ITEMS[id]["min"], ITEMS[id]["max"])]
+# Returns [item_id, quantity]. pool = which items can drop and how likely (default: the
+# weights above); qty_mult scales the stack size (at least 1).
+static func roll(rng: RandomNumberGenerator, pool: Dictionary = ITEMS, qty_mult: float = 1.0) -> Array:
+	var id := Rng.pick(pool, rng)
+	var qty: int = rng.randi_range(ITEMS[id]["min"], ITEMS[id]["max"])
+	return [id, maxi(1, int(round(qty * qty_mult)))]

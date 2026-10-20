@@ -4,6 +4,10 @@ const Loot = preload("res://data/loot.gd")
 
 # Each crate rolls from its own seed, so contents don't depend on open order.
 var seed_value := 0
+var pool: Dictionary = Loot.ITEMS  # which items can drop; the loot zone sets this
+var qty_mult := 1.0
+var rolls := [1, 3]  # [min, max] item rolls
+var color := Color(0.9, 0.7, 0.1)
 var contents: Array = []  # [[id, qty], ...] still inside; rolled on first take
 var _rolled := false
 var _mat := StandardMaterial3D.new()
@@ -15,7 +19,7 @@ func _ready() -> void:
 	add_child(shape)
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = BoxMesh.new()
-	_mat.albedo_color = Color(0.9, 0.7, 0.1)
+	_mat.albedo_color = color
 	mesh.material_override = _mat
 	add_child(mesh)
 
@@ -27,8 +31,8 @@ func take_into(inventory) -> Dictionary:
 		_rolled = true
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed_value
-		for i in rng.randi_range(1, 3):
-			contents.append(Loot.roll(rng))
+		for i in rng.randi_range(rolls[0], rolls[1]):
+			contents.append(Loot.roll(rng, pool, qty_mult))
 	var taken := {}
 	var left: Array = []
 	for r in contents:
