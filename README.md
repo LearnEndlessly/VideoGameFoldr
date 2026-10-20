@@ -40,8 +40,43 @@ profile_unit.gd  # profile save/load round trip, overwrite, corrupt-file recover
 ammo_threat.gd   # ammo cost, cooldown, empty weapon, starting-kit rule, group count, threat clock (continuous, wave, control). Exit code 1 on failure.
 profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps nothing, leaving the zone resets the timer,
                  # far loot requests are refused, and a second process reads the file back. Exit code 1 on failure.
+extract.gd       # two extract zones: placement constraints on 40 seeds, determinism, zone B's noise, hold reset, beam reveal radius, threat clock HUD.
+layout_isolation.gd  # everything except the extract zones is identical to the pre-extract build (tests/fixtures/layout_golden.json), and extract tuning moves only the zones.
+enemy_base.gd    # enemy view cones and suspicion, enemy bases and their respawn beams, ammo drops.
+base.gd, difficulty.gd, reload.gd, aim_color.gd  # the base of operations and saves, raid difficulty and the reward multiplier, magazines and reload, laser colours.
 ```
 The profile tests print a JSON parse error once; that is the deliberate corrupt-file case.
+
+## What exists now
+- **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (equip and upgrade weapons), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and a raid terminal with five difficulty options that scale the rewards.
+- **Raid**: seeded procedural map, two small loot rooms, cover, two safe nooks, enemy patrols with visible view cones and a suspicion meter, four enemy bases that respawn defenders (red beams show the countdown), ammo drops, a threat clock that sends every patrol after you.
+- **Extraction: two routes.** Zone A "Safe route" is far from the start with an 8 s hold. Zone B "Fast route" is close to the start with a 12 s hold and is noisy: starting a hold alerts every enemy group within 30 m. Extract beams only show within 25 m, so there is no compass; the map pit in the base shows both. A threat clock countdown (top right) turns amber at 30 s and red at 10 s, and after it fires an arrow points toward the nearest zone.
+- **Saves** (`scripts/profile.gd`): stash, weapon levels, attributes, difficulty choices, stats; versioned and atomically written.
+- Playbot baselines before and after the extract work: `docs/baseline_before_extract.md`, `docs/baseline_after_extract.md` (`tools/run_baseline.ps1` makes them).
+
+## Not built yet
+- The skill tree (three attributes stand in for it), durability and repair (`repair_kit` never drops), base building.
+- Bringing stash items into a raid, a use for most of the stash, more than two weapons, ranged or other enemy types, a reward for destroying an enemy base, rewards that differ between the two extract routes.
+- See `docs/DESIGN_REVIEW.md` for the full list of weak spots.
+
+## Tuning values to look at first (extraction)
+All in `data/tuning.gd`:
+- `EXTRACT_HOLD_SECONDS` (8) and `EXTRACT_B_HOLD_SECONDS` (12): how much longer the fast route costs.
+- `EXTRACT_B_NOISE_RADIUS` (30): how many patrols the fast route wakes.
+- `EXTRACT_A_MIN_PATH` (32), `EXTRACT_B_MIN_PATH` / `EXTRACT_B_MAX_PATH` (8 / 18), `EXTRACT_MIN_SEPARATION` (35), `EXTRACT_MIN_BASE_DISTANCE` (10): where the zones may go.
+- `EXTRACT_BEAM_REVEAL_RADIUS` (25) and `EXTRACT_BEAM_ALWAYS_VISIBLE` (false): flip the second one to compare with the old see-it-from-anywhere beam.
+- `THREAT_DELAY_SECONDS` (120), `THREAT_COUNTDOWN_AMBER_SECONDS` (30), `THREAT_COUNTDOWN_RED_SECONDS` (10), `THREAT_EXTRACT_TICK` (true), `THREAT_TICK_RADIUS` (110 px).
+
+## Assumptions made for the extraction work
+- **Layout stays frozen:** zones come from their own RNG stream (seeded from the map seed) and are placed after everything else. To keep every old seed's terrain, crates and enemies unchanged, the old single-zone draws are still made and its 9 m patch is still kept clear, so each map has an empty patch where the old zone used to be. Regenerating the layout fixtures would let that go.
+- **"Path distance"** is walking distance on a 1 m, 4-connected grid around walls, cover, crates and bases (no navmesh), so it is slightly longer than a straight line on diagonals. Separation and base clearance are straight-line metres. The arrow's distance is also a straight line.
+- **Numbers I chose** (you gave none): A at least 32 m of path (40 was infeasible on most seeds with the other constraints), B 8 to 18 m, separation 35 m, base clearance 10 m, 6 m zones, 300 draws per zone and 5 pair retries. All 120 seeds I tried placed without a failure; on failure it logs a clear error and falls back.
+- **Zones may overlap the edges of cover:** only the central 5 x 5 m must be walkable. With strict clearance there was no room for B near the start.
+- **"Alerted toward that zone"** means the whole group is alerted (its members then chase the player, who is in the zone); a group counts as nearby if any member is within the radius (flat distance). Starting a hold alerts once; a continued hold does not re-alert.
+- **Beam reveal** applies to the extract beams and their labels only; enemy-base beams stay visible. The toggle is `EXTRACT_BEAM_ALWAYS_VISIBLE` (tuning constants are upper case); tests change it through `Main.extract_cfg`, since constants cannot change at run time.
+- The old top-left "[PATROLS CONVERGING]" flag is gone; the top-right indicator replaces it.
+- Both zones pay out the same. The playbot picks the nearer zone and never weighs hold time or noise, so its baselines do not test the decision itself.
+- The baseline seeds are 1 to 40 (the earlier baseline's seed list was not recorded), and the "before" baseline was rerun on the current build.
 
 ## Current state
 What exists, known gaps, phase notes, rebalance table, telemetry and art hooks: `docs/STATE.md` (read only when the task needs it).
