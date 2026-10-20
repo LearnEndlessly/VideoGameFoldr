@@ -143,8 +143,7 @@ func take_damage(amount: int) -> bool:
 func _process(_d: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	if cam != null:
-		# Look away from the camera so the quads' front faces it.
-		_bar.look_at(_bar.global_position * 2.0 - cam.global_position)
+		_bar.global_basis = cam.global_basis  # parallel to the screen: faces the camera without skewing
 
 func _physics_process(delta: float) -> void:
 	velocity.x = 0.0

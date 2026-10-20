@@ -43,6 +43,7 @@ var _player: Player
 var _zone_mat := StandardMaterial3D.new()
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
 var _hud: Label
+var _help: Label
 var _feed: VBoxContainer  # recent pickups, each with its symbol
 var _extract_box: VBoxContainer
 var _extract_label: Label
@@ -136,9 +137,20 @@ func _build_raid() -> void:
 	var layer := CanvasLayer.new()
 	_hud = Label.new()
 	_hud.position = Vector2(16, 16)
+	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # a narrow left column, clear of the extract bar in the middle
+	_hud.custom_minimum_size = Vector2(420, 0)
+	_help = Label.new()  # controls hint along the bottom edge, wrapped so it never runs off screen
+	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_help.custom_minimum_size = Vector2(900, 0)
+	_help.modulate = Color(1, 1, 1, 0.75)
+	layer.add_child(_help)
+	_help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_help.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_help.offset_left = 16
+	_help.offset_bottom = -12
 	layer.add_child(_hud)
 	_feed = VBoxContainer.new()
-	_feed.position = Vector2(16, 110)
+	_feed.position = Vector2(16, 170)
 	layer.add_child(_feed)
 	var ui := InventoryUI.new()
 	layer.add_child(ui)
@@ -156,7 +168,7 @@ func _build_raid() -> void:
 	layer.add_child(_banner)
 	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_banner.offset_top = 90
+	_banner.offset_top = 140  # below the extract countdown, clear of the HUD text
 	add_child(layer)
 
 func _build_extract_hud(layer: CanvasLayer) -> void:
@@ -182,8 +194,9 @@ func _process(_d: float) -> void:
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
-	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   %s %s\nLoot: %s\n%s\nWASD move, Shift sprint (loud!), Space jump, LMB shoot, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
-		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text(), hold]
+	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   %s %s\nLoot: %s\n%s" \
+		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text()]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." % hold
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
