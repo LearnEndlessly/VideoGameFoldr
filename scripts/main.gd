@@ -120,6 +120,7 @@ func _build_raid() -> void:
 	raid = Raid.new()
 	raid.profile = profile
 	raid.seed_value = _seed
+	raid.map_info = _map_info()
 	add_child(raid)
 	raid.setup(_player)
 	_player.raid = raid
@@ -268,6 +269,22 @@ func _next_raid() -> void:
 func _set_safe(body: Node3D, value: bool) -> void:
 	if body == _player:
 		_player.safe = value
+
+# The starting map as data, written to the first line of each raid's log (scripts/telemetry.gd).
+# Add anything new about the map here.
+func _map_info() -> Dictionary:
+	var zones: Array = []
+	for st in structures:
+		zones.append({"id": st["id"], "center": st["center"], "size": st["size"], "door": st["door"]})
+	var enemies: Array = []
+	var crates: Array = []
+	for c in get_children():
+		if "stats" in c:
+			enemies.append({"id": c.stats["type"], "mod": c.stats["modifier"], "group": c.group_id, "pos": c.position})
+		elif c.is_in_group("lootable"):
+			crates.append({"zone": c.zone_id, "pos": c.position})
+	return {"w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "shelters": shelters,
+		"zones": zones, "enemies": enemies, "crates": crates}
 
 # --- map generation -------------------------------------------------------------
 
@@ -453,6 +470,7 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 	for p in spots:
 		var c := Crate.new()
 		c.seed_value = rng.randi()
+		c.zone_id = id
 		c.pool = zone["pool"]
 		c.qty_mult = zone["qty_mult"]
 		c.rolls = zone["rolls"]

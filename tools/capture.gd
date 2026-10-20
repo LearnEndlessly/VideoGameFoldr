@@ -6,6 +6,7 @@
 extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
+const Telemetry = preload("res://scripts/telemetry.gd")
 
 const MAX_FILES := 24  # screenshots kept in the output folder; older ones are deleted
 
@@ -44,6 +45,7 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	_prune(out, 0)  # a run replaces the previous tour, so start from an empty folder
 	Main.show_start = false
+	Telemetry.enabled = false  # the tour is not real play: keep it out of the real logs
 	var main = load("res://main.tscn").instantiate()
 	main.seed_override = map_seed
 	root.add_child(main)

@@ -4,6 +4,7 @@ const Loot = preload("res://data/loot.gd")
 
 # Each crate rolls from its own seed, so contents don't depend on open order.
 var seed_value := 0
+var zone_id := ""  # which loot area this crate is in (logged with every open)
 var pool: Dictionary = Loot.ITEMS  # which items can drop; the loot zone sets this
 var qty_mult := 1.0
 var rolls := [1, 3]  # [min, max] item rolls

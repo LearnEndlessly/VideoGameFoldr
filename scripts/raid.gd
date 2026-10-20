@@ -32,12 +32,14 @@ var threat_wave_seconds: float = Tuning.THREAT_WAVE_SECONDS
 var threat_active := false
 var elapsed := 0.0  # seconds since the raid began
 var seed_value := 0  # map seed, only logged; main may set it
+var map_info := {}  # the starting map as data, set by main; logged on the first line of the raid's log
 var shots := 0  # shots fired this raid
 var ammo_spent := 0
 
 var _threat_reached := false
 var _player
 var _fire_cooldown := 0.0
+var _sample_clock := Telemetry.SAMPLE_SECONDS  # starts full so the first sample is logged at once
 var _threat_done := false  # a wave has run; it does not start again
 var _wave_left := 0.0
 
@@ -46,7 +48,7 @@ func setup(player) -> void:
 	player.died.connect(_on_player_died)
 	if Tuning.STARTING_AMMO > 0:
 		brought["ammo"] = Tuning.STARTING_AMMO - player.inventory.add("ammo", Tuning.STARTING_AMMO)
-	Telemetry.start({"seed": seed_value, "start_ammo": Tuning.STARTING_AMMO, "threat_delay": threat_delay})
+	Telemetry.start({"seed": seed_value, "start_ammo": Tuning.STARTING_AMMO, "threat_delay": threat_delay, "map": map_info})
 
 # Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
 # for the result; otherwise nothing changes. The result is announced like a pickup.
@@ -105,7 +107,7 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 			var kill_info := {}
 			if "stats" in enemy:  # only enemies carry type/modifier
 				kill_info = {"id": enemy.stats["type"], "mod": enemy.stats["modifier"], "group": enemy.group_id,
-					"weapon": weapon_id, "range": aim.origin.distance_to(hit["position"])}
+					"weapon": weapon_id, "range": aim.origin.distance_to(hit["position"]), "pos": enemy.global_position}
 			if enemy.take_damage(dmg):
 				_player.kills += 1
 				Telemetry.emit("player.kill.enemy", kill_info)
@@ -132,14 +134,15 @@ func request_loot(crate) -> bool:
 	if state != State.ACTIVE or not is_instance_valid(crate):
 		return false
 	if _player.global_position.distance_to(crate.global_position) > Tuning.LOOT_REACH:
-		Telemetry.emit("player.open.crate", {"outcome": "far", "taken": {}})
+		Telemetry.emit("player.open.crate", {"outcome": "far", "taken": {}, "zone": crate.zone_id, "pos": crate.global_position})
 		return false
 	var taken: Dictionary = crate.take_into(_player.inventory)
 	for id in taken:
 		picked_up.emit(id, taken[id])
 	if not crate.contents.is_empty():
 		inventory_full.emit()
-	Telemetry.emit("player.open.crate", {"outcome": "ok" if crate.contents.is_empty() else "full", "taken": taken})
+	Telemetry.emit("player.open.crate", {"outcome": "ok" if crate.contents.is_empty() else "full", "taken": taken,
+		"left": crate.contents.size(), "zone": crate.zone_id, "pos": crate.global_position})
 	return true
 
 func _physics_process(delta: float) -> void:
@@ -148,6 +151,10 @@ func _physics_process(delta: float) -> void:
 	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
 	elapsed += delta
 	Telemetry.clock = elapsed
+	_sample_clock += delta
+	if _sample_clock >= Telemetry.SAMPLE_SECONDS:
+		_sample_clock = 0.0
+		_sample()
 	if not threat_active and not _threat_done and elapsed >= threat_delay:
 		_start_threat()
 	if threat_active:
@@ -161,6 +168,19 @@ func _physics_process(delta: float) -> void:
 		extract_elapsed += delta
 		if extract_elapsed >= hold_seconds:
 			_finish("extracted")
+
+# A snapshot of where the player is and what they hold, for studying routes and resource use.
+func _sample() -> void:
+	var near := -1.0  # distance to the nearest enemy, -1 if none are left
+	var alerted := 0
+	for e in get_tree().get_nodes_in_group("enemy"):
+		var d: float = e.global_position.distance_to(_player.global_position)
+		near = d if near < 0.0 else minf(near, d)
+		if e.alert:
+			alerted += 1
+	Telemetry.emit("raid.sample.state", {"pos": _player.global_position, "hp": _player.health,
+		"pack": _player.inventory.totals(), "near": near, "alert": alerted, "safe": _player.safe,
+		"sprint": _player.sprinting, "extracting": extracting})
 
 # What the player holds beyond the unspent starting kit: the loot at stake.
 func _loot() -> Dictionary:
@@ -204,7 +224,9 @@ func _finish(outcome: String) -> void:
 	if outcome == "extracted" and profile != null:
 		profile.add_items(items)
 		saved = profile.save()
-	Telemetry.emit("raid.end.raid", {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
-		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached})
+	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
+		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached}
+	Telemetry.emit("raid.end.raid", end_info)
 	Telemetry.finish()
+	Telemetry.record_run(end_info)
 	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills})
