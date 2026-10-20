@@ -297,43 +297,62 @@ func map_info_rows() -> Array:
 	return [["SIZE", "%.0fx%.0f" % [d["w"], d["d"]]], ["LOOT ROOMS", str(d["rooms"])], ["ENEMY BASES", str(d["spawners"].size())],
 		["PATROLS", str(d["groups"].size())], ["COVER", str(d["cover"])]]
 
-# A free-standing screen beyond the map, facing the player: the map number, its numbers and a colour key.
+# A low display wrapped around the far edge of the map: a strip along the back rim with the map number and its
+# numbers, and a wing angled toward the player at each end holding the colour key. All tilted to face upward.
 func _add_map_display() -> void:
-	var z := -3.7
-	var cy := 1.8  # centre height of the screen
 	var accent := Color(0.7, 0.85, 1.0)
-	_box(Vector3(0.2, 1.0, 0.2), Vector3(0, 0.5, z), Color(0.15, 0.17, 0.2))  # the stand
-	_box(Vector3(4.6, 2.0, 0.06), Vector3(0, cy, z), accent)  # the frame
-	_box(Vector3(4.4, 1.8, 0.08), Vector3(0, cy, z + 0.02), Color(0.04, 0.045, 0.06))
-	var zf := z + 0.08
-	_map_title = _display_label("", 0.0, 2.4, zf, 130, accent)
+	var back := _display_board(Vector3(0, 0.3, -PIT.y / 2.0 - 0.17), Vector3(-30, 0, 0), Vector2(PIT.x, 0.6), accent)
+	_map_title = _display_label(back, "", -2.0, 0.0, 44, accent)
 	_map_title.font = UIKit.bold()
-	for i in 5:
-		_map_values.append(_display_label("", -1.9 + i * 0.95, 1.95, zf, 80, Color.WHITE))
+	for i in 5:  # clear of the buttons that hover in front of the middle
+		var x: float = [-1.15, 1.0, 1.5, 1.95, 2.4][i]
+		_map_values.append(_display_label(back, "", x, 0.1, 34, Color.WHITE))
 		_map_values[i].font = UIKit.bold()
-		_map_captions.append(_display_label("", -1.9 + i * 0.95, 1.6, zf, 24, UIKit.DIM))
-	var legend := [["SAFE EXTRACT", Color(0.2, 1, 0.3), -1.75], ["FAST EXTRACT", Color(1, 0.6, 0.1), -0.65], ["ENEMY BASE", Color(1, 0.15, 0.1), 0.5], ["PATROL", Color(1, 0.6, 0.1), 1.65]]
-	for e in legend:
-		var swatch := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.1, 0.1, 0.01)
-		swatch.mesh = bm
-		swatch.position = Vector3(e[2] - 0.4, 1.2, zf)
-		var m := StandardMaterial3D.new()
-		m.albedo_color = e[1]
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		swatch.material_override = m
-		add_child(swatch)
-		_display_label(e[0], e[2] + 0.1, 1.2, zf, 28, UIKit.DIM)
+		_map_captions.append(_display_label(back, "", x, -0.14, 14, UIKit.DIM))
+	var legends := [[-PIT.x / 2.0 - 0.7, 40.0, [["SAFE EXTRACT", Color(0.2, 1, 0.3)], ["FAST EXTRACT", Color(1, 0.6, 0.1)]]],
+		[PIT.x / 2.0 + 0.7, -40.0, [["ENEMY BASE", Color(1, 0.15, 0.1)], ["PATROL", Color(1, 0.6, 0.1)]]]]
+	for w in legends:
+		var wing := _display_board(Vector3(w[0], 0.3, -PIT.y / 2.0 + 0.1), Vector3(-30, w[1], 0), Vector2(1.5, 0.6), accent)
+		for i in 2:
+			var swatch := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.1, 0.1, 0.01)
+			swatch.mesh = bm
+			swatch.position = Vector3(-0.62, 0.12 - i * 0.24, 0.045)
+			var m := StandardMaterial3D.new()
+			m.albedo_color = w[2][i][1]
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			swatch.material_override = m
+			wing.add_child(swatch)
+			var l := _display_label(wing, w[2][i][0], -0.5, 0.12 - i * 0.24, 22, UIKit.DIM)
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
-func _display_label(text: String, x: float, y: float, z: float, size: int, color: Color) -> Label3D:
+# A dark plate with a coloured frame, at `pos` turned by `rot` degrees; returns the node to put labels on.
+func _display_board(pos: Vector3, rot: Vector3, size: Vector2, accent: Color) -> Node3D:
+	var board := Node3D.new()
+	board.position = pos
+	board.rotation_degrees = rot
+	add_child(board)
+	for layer in [[size + Vector2(0.08, 0.08), accent, 0.0], [size, Color(0.04, 0.045, 0.06), 0.01]]:
+		var mesh := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(layer[0].x, layer[0].y, 0.04)
+		mesh.mesh = bm
+		mesh.position.z = layer[2]
+		var m := StandardMaterial3D.new()
+		m.albedo_color = layer[1]
+		mesh.material_override = m
+		board.add_child(mesh)
+	return board
+
+func _display_label(parent: Node3D, text: String, x: float, y: float, size: int, color: Color) -> Label3D:
 	var l := Label3D.new()
 	l.text = text
 	l.font_size = size
 	l.pixel_size = 0.004
 	l.modulate = color
-	l.position = Vector3(x, y, z)
-	add_child(l)
+	l.position = Vector3(x, y, 0.045)
+	parent.add_child(l)
 	return l
 
 func _update_map_display() -> void:
