@@ -42,6 +42,10 @@ var elapsed := 0.0  # seconds since the raid began
 var seed_value := 0  # map seed, only logged; main may set it
 var map_info := {}  # the starting map as data, set by main; logged on the first line of the raid's log
 var shots := 0  # shots fired this raid
+var shots_hit := 0  # of those, shots that hurt something
+var depth := 0  # levels descended before this one (0 = fresh from the base)
+var carry := {}  # loot carried down from the last level: it is loot again, at risk
+var drop_mult := 1.0  # scales the ammo drop chance (deeper levels drop more)
 var ammo_spent := 0
 var start_ammo: int = Tuning.STARTING_AMMO  # set by main from the raid difficulty
 var reward_mult := 1.0  # scales the loot kept and the points earned on an extract (data/difficulty.gd)
@@ -63,11 +67,13 @@ func setup(player) -> void:
 	_player = player
 	_drop_rng.seed = seed_value
 	player.died.connect(_on_player_died)
+	for id in carry:
+		player.inventory.add(id, int(carry[id]))
 	if start_ammo > 0:
 		brought["ammo"] = start_ammo - player.inventory.add("ammo", start_ammo)
 	for id in WeaponData.DATA:
 		loaded[id] = mini(WeaponData.DATA[id]["clip"], player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
-	Telemetry.start({"seed": seed_value, "start_ammo": start_ammo, "reward_mult": reward_mult, "threat_delay": threat_delay, "map": map_info})
+	Telemetry.start({"seed": seed_value, "start_ammo": start_ammo, "reward_mult": reward_mult, "threat_delay": threat_delay, "depth": depth, "map": map_info})
 
 # Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
 # for the result; otherwise nothing changes. The result is announced like a pickup.
@@ -161,12 +167,14 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 				_player.kills += 1
 				Telemetry.emit("player.kill.enemy", kill_info)
 				_drop_ammo(enemy.global_position, enemy.stats)
+	if hits > 0:
+		shots_hit += 1
 	Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "fired", "hits": hits, "dmg": total_dmg, "ammo_left": _player.inventory.count(item)})
 	return true
 
 # Rolls an enemy's ammo drop (data/enemies.gd) and, on success, leaves a pickup where it died.
 func _drop_ammo(pos: Vector3, stats: Dictionary) -> bool:
-	if _drop_rng.randf() >= float(stats.get("drop_chance", 0.0)):
+	if _drop_rng.randf() >= float(stats.get("drop_chance", 0.0)) * drop_mult:
 		return false
 	var amount: Array = stats["drop"]
 	var pickup := Pickup.new()
@@ -344,13 +352,16 @@ func _finish(outcome: String) -> void:
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
 	var points := 0  # attribute points earned (successful extracts only)
-	if outcome == "extracted" and profile != null:
-		profile.add_items(items)
-		points = profile.record_extract(_player.kills, reward_mult)
+	if profile != null:
+		if outcome == "extracted":
+			profile.add_items(items)
+			points = profile.record_extract(_player.kills, reward_mult)
+		profile.record_raid(outcome == "extracted", _player.kills, shots, shots_hit, depth + 1)
 		saved = profile.save()
-	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
-		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached}
+	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots, "hits": shots_hit,
+		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached, "depth": depth}
 	Telemetry.emit("raid.end.raid", end_info)
 	Telemetry.finish()
 	Telemetry.record_run(end_info)
-	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points, "reward_mult": reward_mult})
+	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points, "reward_mult": reward_mult,
+		"shots": shots, "hits": shots_hit, "duration": elapsed, "depth": depth})

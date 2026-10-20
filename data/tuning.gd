@@ -116,6 +116,21 @@ const EXTRACT_BEAM_ALWAYS_VISIBLE := false
 # works the whole pair is redrawn up to EXTRACT_PAIR_RETRIES times. Then it logs an error and falls back.
 const EXTRACT_PLACE_TRIES := 300
 const EXTRACT_PAIR_RETRIES := 5
+# Going deeper: after an extract the player may descend instead of going home. The loot just extracted
+# comes along, at risk again, on a fresh map (new crates, so loot is reset). Each level below the first adds:
+#   DEPTH_EXTRA_SPAWNERS more enemy bases (at most DEPTH_MAX_EXTRA_SPAWNERS extra), placed from their own stream
+#   bases spawning faster: the interval times DEPTH_INTERVAL_MULT per level (never under DEPTH_MIN_INTERVAL s),
+#     and one more defender per base every DEPTH_MAX_ALIVE_EVERY levels
+#   DEPTH_AMMO_BONUS more starting ammo, and enemy ammo drops DEPTH_DROP_BONUS (a fraction) likelier
+#   DEPTH_REWARD_BONUS added to the reward multiplier (loot kept and points earned)
+const DEPTH_EXTRA_SPAWNERS := 1
+const DEPTH_MAX_EXTRA_SPAWNERS := 4
+const DEPTH_INTERVAL_MULT := 0.85
+const DEPTH_MIN_INTERVAL := 4.0
+const DEPTH_MAX_ALIVE_EVERY := 2
+const DEPTH_AMMO_BONUS := 6
+const DEPTH_DROP_BONUS := 0.25
+const DEPTH_REWARD_BONUS := 0.25
 # Metres from the player to a crate for a loot request to be accepted.
 const LOOT_REACH := 4.0
 # Master volume for all sound effects, in dB (0 = full, -6 = about half, -80 = silent).

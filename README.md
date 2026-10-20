@@ -43,6 +43,7 @@ profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps noth
 extract.gd       # two extract zones: placement constraints on 40 seeds, determinism, zone B's noise, hold reset, beam reveal radius, threat clock HUD.
 layout_isolation.gd  # everything except the extract zones is identical to the pre-extract build (tests/fixtures/layout_golden.json), and extract tuning moves only the zones.
 enemy_base.gd    # enemy view cones and suspicion, enemy bases and their respawn beams, ammo drops.
+progression.gd  # the scoreboard stats (profile, wall board), the end screen choice, and descending: carried loot, extra bases, faster spawns, ammo, reward, map unchanged.
 base.gd, difficulty.gd, reload.gd, aim_color.gd  # the base of operations and saves, raid difficulty and the reward multiplier, magazines and reload, laser colours.
 ```
 The profile tests print a JSON parse error once; that is the deliberate corrupt-file case.
@@ -51,6 +52,9 @@ The profile tests print a JSON parse error once; that is the deliberate corrupt-
 - **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (equip and upgrade weapons), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and a raid terminal with five difficulty options that scale the rewards.
 - **Raid**: seeded procedural map, two small loot rooms, cover, two safe nooks, enemy patrols with visible view cones and a suspicion meter, four enemy bases that respawn defenders (red beams show the countdown), ammo drops, a threat clock that sends every patrol after you.
 - **Extraction: two routes.** Zone A "Safe route" is far from the start with an 8 s hold. Zone B "Fast route" is close to the start with a 12 s hold and is noisy: starting a hold alerts every enemy group within 30 m. Extract beams only show within 25 m, so there is no compass; the map pit in the base shows both. A threat clock countdown (top right) turns amber at 30 s and red at 10 s, and after it fires an arrow points toward the nearest zone.
+- **Scoreboard.** The base's north wall carries the RAID LEDGER: runs, extracted, killed in action, survival rate, kills, shots fired, accuracy (shots that hurt something) and deepest level, kept in the profile for every raid (`Profile.record_raid`).
+- **Going deeper.** After an extract the end screen offers DESCEND next to RETURN TO BASE. Descending takes the loot just extracted back out of the stash and into the next level's backpack, unbanked and at risk again, on a fresh map (new crates). Each level adds enemy bases (from their own RNG stream), faster base spawns, one more defender per base every two levels, more starting ammo and likelier ammo drops, and +25% to the reward multiplier. Dying loses the carried loot; returning to base banks it. The HUD shows the level.
+- **Menu style** (`scripts/ui_kit.gd`): every panel uses one look: dark slabs with a hard accent edge in the station's colour, hazard tape under headers, heavy spaced capitals, big numerals, item and stat tiles, pips for levels, meters for weapon stats, a risk dial for difficulty and one oversized button for the action that matters. The end screen stamps the verdict (EXTRACTED / K.I.A.) and the safe choice has the focus. Design notes and references: `docs/MENU_DESIGN.md`.
 - **Saves** (`scripts/profile.gd`): stash, weapon levels, attributes, difficulty choices, stats; versioned and atomically written.
 - Playbot baselines before and after the extract work: `docs/baseline_before_extract.md`, `docs/baseline_after_extract.md` (`tools/run_baseline.ps1` makes them).
 
@@ -66,6 +70,19 @@ All in `data/tuning.gd`:
 - `EXTRACT_A_MIN_PATH` (32), `EXTRACT_B_MIN_PATH` / `EXTRACT_B_MAX_PATH` (8 / 18), `EXTRACT_MIN_SEPARATION` (35), `EXTRACT_MIN_BASE_DISTANCE` (10): where the zones may go.
 - `EXTRACT_BEAM_REVEAL_RADIUS` (25) and `EXTRACT_BEAM_ALWAYS_VISIBLE` (false): flip the second one to compare with the old see-it-from-anywhere beam.
 - `THREAT_DELAY_SECONDS` (120), `THREAT_COUNTDOWN_AMBER_SECONDS` (30), `THREAT_COUNTDOWN_RED_SECONDS` (10), `THREAT_EXTRACT_TICK` (true), `THREAT_TICK_RADIUS` (110 px).
+
+## Tuning values to look at first (going deeper)
+All in `data/tuning.gd`: `DEPTH_EXTRA_SPAWNERS` (1) and `DEPTH_MAX_EXTRA_SPAWNERS` (4), `DEPTH_INTERVAL_MULT` (0.85 per level) and `DEPTH_MIN_INTERVAL` (4 s), `DEPTH_MAX_ALIVE_EVERY` (2), `DEPTH_AMMO_BONUS` (6), `DEPTH_DROP_BONUS` (0.25), `DEPTH_REWARD_BONUS` (0.25).
+
+## Assumptions made for the progression work
+- **A descent is part of the run it came from:** "runs" counts once, when the level-1 raid finishes; every level adds its kills, shots and hits; "deepest level" is the highest level finished.
+- **Loot is banked first, then taken back out** when you descend (so the extract still counts and pays its attribute points, and a crash mid-descent cannot lose it twice). It then counts as loot again: dying on the next level loses it.
+- **A new level is a new map** derived from the old map's number, so a level is never replayed. "Loot reset" means fresh crates on that map. Descent state lives in `Main.depth` and `Main.carry` (static, like `show_start`).
+- **"More enemy spawn locations"** means extra enemy bases, one per level up to four extra, never within 10 m of an extract zone. "Higher spawn rates" is the interval multiplier and the extra defender.
+- Dying now also saves the profile (the scoreboard has to remember it); the stash is untouched.
+- Accuracy counts a shot as a hit if any pellet hurt an enemy or a base.
+- Old saves load with zeros for the new stats.
+- Not built: a level cap, a depth-based reward curve beyond the linear bonus, a "best run" list.
 
 ## Assumptions made for the extraction work
 - **Layout stays frozen:** zones come from their own RNG stream (seeded from the map seed) and are placed after everything else. To keep every old seed's terrain, crates and enemies unchanged, the old single-zone draws are still made and its 9 m patch is still kept clear, so each map has an empty patch where the old zone used to be. Regenerating the layout fixtures would let that go.

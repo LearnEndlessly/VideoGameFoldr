@@ -50,7 +50,7 @@ func _run() -> void:
 
 	# Attribute points: earned on extract (1 + 1 per 5 kills), spent one level at a time.
 	_check(not p.spend_point("speed"), "no points, no level")
-	_check(p.record_extract(12) == 3 and p.points == 3 and p.stats == {"extracts": 1, "kills": 12}, "12 kills should earn 1 + 2 points, got %d" % p.points)
+	_check(p.record_extract(12) == 3 and p.points == 3 and p.stats["extracts"] == 1, "12 kills should earn 1 + 2 points, got %d" % p.points)
 	_check(p.spend_point("speed") and p.spend_point("constitution") and p.spend_point("constitution") and p.points == 0, "three points, three levels")
 	_check(not p.spend_point("handling"), "spending needs a point")
 	_check(is_equal_approx(p.speed_mult(), 1.06) and p.max_health(100) == 120 and is_equal_approx(p.armor(), 0.08), "attribute effects were wrong")

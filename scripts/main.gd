@@ -34,6 +34,9 @@ const SHELTER_COUNT := 2
 static var show_start := true
 # The map seed picked at the base's map table for the next raid; -1 = none picked.
 static var chosen_seed := -1
+# How many levels this run has descended (0 = a raid started at the base) and the loot carried down, still unbanked.
+static var depth := 0
+static var carry := {}
 
 var rng := RandomNumberGenerator.new()
 var seed_override := -1  # tests set these before add_child
@@ -147,6 +150,7 @@ func _build_raid() -> void:
 		_seed = int(args[0]) if args.size() > 0 else randi()
 	rng.seed = _seed
 	_build_map()
+	_add_depth_bases()
 	_apply_difficulty(Difficulty.values(profile.difficulty))
 
 	var sun := DirectionalLight3D.new()
@@ -166,8 +170,12 @@ func _build_raid() -> void:
 	for id in WeaponData.DATA:
 		raid.damage_mult[id] = profile.damage_mult(id)
 	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
-	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"]
-	raid.reward_mult = profile.reward_mult()
+	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"] + Tuning.DEPTH_AMMO_BONUS * depth
+	raid.reward_mult = profile.reward_mult() + Tuning.DEPTH_REWARD_BONUS * depth
+	raid.drop_mult = 1.0 + Tuning.DEPTH_DROP_BONUS * depth
+	raid.depth = depth
+	raid.carry = carry
+	carry = {}
 	raid.b_hold_seconds = float(extract_cfg["b_hold"])
 	raid.b_noise_radius = float(extract_cfg["b_noise_radius"])
 	for z in extract_zones:
@@ -313,7 +321,7 @@ func _update_status_hud() -> void:
 	var held: int = _player.inventory.count(w["ammo_item"])
 	_hp_bar.max_value = _player.max_health
 	_hp_bar.value = _player.health
-	_stats_label.text = "HP %d   FRAGS %d   SHOTS %d" % [_player.health, _player.kills, raid.shots]
+	_stats_label.text = "LEVEL %d   HP %d   FRAGS %d   SHOTS %d" % [depth + 1, _player.health, _player.kills, raid.shots]
 	_ammo_bar.total = w["clip"]
 	_ammo_bar.filled = shown
 	_cross.spread = w["spread"]
@@ -437,17 +445,11 @@ func _on_raid_ended(result: Dictionary) -> void:
 	add_child(layer)
 	var screen := ScreenUI.new()
 	layer.add_child(screen)
-	var subtitle := "Everything you carried this raid is lost."
-	if extracted:
-		subtitle = "Your loot is stored in the base." if result["saved"] else "WARNING: your profile could not be saved."
-		subtitle += "  +%d attribute point(s): spend them at the Character station." % result["points"]
-		subtitle += "  Reward x%.2f." % result["reward_mult"]
-	subtitle += "  Enemies killed: %d." % result["kills"]
-	screen.show_screen("EXTRACTED" if extracted else "YOU DIED", subtitle,
-		"Kept this raid" if extracted else "Lost this raid", result["items"],
-		profile.totals, "Return to base", _return_to_base)
+	screen.show_result(result, depth + 1, _return_to_base, _descend.bind(result["items"]))
 
 func _return_to_base() -> void:
+	depth = 0
+	carry = {}
 	show_start = true
 	get_tree().paused = false
 	get_tree().reload_current_scene.call_deferred()
@@ -479,10 +481,29 @@ func _apply_difficulty(d: Dictionary) -> void:
 		if "stats" in c and not c.is_queued_for_deletion():
 			c.apply_difficulty(float(d["damage"]), float(d["awareness"]))
 	for sp in _spawners:
-		sp.interval = float(d["bases"]["interval"])
-		sp.max_alive = int(d["bases"]["max_alive"])
+		sp.interval = maxf(float(d["bases"]["interval"]) * pow(Tuning.DEPTH_INTERVAL_MULT, depth), minf(Tuning.DEPTH_MIN_INTERVAL, float(d["bases"]["interval"])))
+		sp.max_alive = int(d["bases"]["max_alive"]) + depth / Tuning.DEPTH_MAX_ALIVE_EVERY
 		sp.damage_mult = float(d["damage"])
 		sp.detect_seconds = float(d["awareness"])
+
+# Deeper levels have more enemy bases. They come from their own RNG stream (swapped in for the map's while they
+# are placed), so the map underneath is the one its seed makes; a base too near an extract zone is moved.
+func _add_depth_bases() -> void:
+	var extra := mini(depth * Tuning.DEPTH_EXTRA_SPAWNERS, Tuning.DEPTH_MAX_EXTRA_SPAWNERS)
+	if extra <= 0:
+		return
+	var map_rng := rng
+	rng = RandomNumberGenerator.new()
+	rng.seed = _seed + 2
+	for i in extra:
+		for attempt in 6:
+			_place_spawner(_spawners.size())
+			var sp: Node3D = _spawners.back()
+			if extract_zones.all(func(z): return Vector2(z["pos"].x - sp.position.x, z["pos"].z - sp.position.z).length() >= Tuning.EXTRACT_MIN_BASE_DISTANCE):
+				break
+			_spawners.pop_back()
+			sp.free()
+	rng = map_rng
 
 # The map a seed makes, as data for the base's map table: builds the map's nodes off the scene tree,
 # reads them back, and frees them. The same seed gives the same map in the raid.
@@ -500,7 +521,21 @@ func preview(map_seed: int) -> Dictionary:
 	m.free()
 	return data
 
+# Stay in the raid: the loot just extracted comes back out of the stash into the next level's backpack (at risk
+# again) and the next map is a fresh one derived from this map's number.
+func _descend(items: Dictionary) -> void:
+	profile.take_items(items)
+	profile.save()
+	carry = items
+	depth += 1
+	chosen_seed = absi(("descend:%d" % _seed).hash()) % 1000000
+	show_start = false
+	get_tree().paused = false
+	get_tree().reload_current_scene.call_deferred()
+
 func _next_raid(map_seed := -1) -> void:
+	depth = 0
+	carry = {}
 	chosen_seed = map_seed
 	show_start = false
 	get_tree().paused = false

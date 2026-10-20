@@ -7,6 +7,7 @@ extends SceneTree
 const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
+const ScreenUI = preload("res://scripts/screen_ui.gd")
 const PATH := "user://capture_base_profile.json"
 
 var out := ""
@@ -27,7 +28,7 @@ func _init() -> void:
 	p.add_items({"ammo": 64, "medkit": 5})
 	p.points = 2
 	p.weapons = {"pistol": 1}
-	p.stats = {"extracts": 3, "kills": 17}
+	p.stats = {"runs": 6, "extracts": 4, "deaths": 2, "kills": 37, "shots": 212, "hits": 96, "deepest": 3}
 	p.save()
 	Main.show_start = true
 	var main = load("res://main.tscn").instantiate()
@@ -46,5 +47,19 @@ func _init() -> void:
 		await _frames(3)
 		await _shot("b_%s" % id)
 		hub._close()
+	hub.player.position = Vector3(3.5, 0.1, -2.0)
+	hub.player._head.rotation.x = 0.25
+	await _frames(3)
+	await _shot("b_board")
+	for outcome in ["extracted", "dead"]:
+		var layer := CanvasLayer.new()
+		root.add_child(layer)
+		var screen := ScreenUI.new()
+		layer.add_child(screen)
+		screen.show_result({"outcome": outcome, "items": {"ammo": 14, "medkit": 3}, "saved": true, "kills": 7, "points": 3,
+			"reward_mult": 1.35, "shots": 41, "hits": 19, "duration": 148.0, "depth": 0}, 1, func(): pass, func(): pass)
+		await _frames(3)
+		await _shot("b_result_%s" % outcome)
+		layer.queue_free()
 	DirAccess.remove_absolute(PATH)
 	quit()

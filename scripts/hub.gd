@@ -18,6 +18,7 @@ const Difficulty = preload("res://data/difficulty.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Sfx = preload("res://scripts/sfx.gd")
+const UIKit = preload("res://scripts/ui_kit.gd")
 
 const HALF_W := 9.0
 const HALF_D := 7.0
@@ -34,6 +35,10 @@ const STATIONS := {
 	"armory": {"name": "ARMORY", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
 	"map": {"name": "MAP PIT", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
+}
+const STATION_TAGLINES := {
+	"raid": "pick your risk and deploy", "stash": "what you brought home", "armory": "choose and sharpen your weapon",
+	"character": "train your operator", "map": "choose the next battlefield",
 }
 # Panels hovering over the map pit, in view while looking at the map: shoot them (or press E close up) to change the map.
 const MAP_BUTTONS := {
@@ -54,7 +59,7 @@ var _prompt: Label
 var _preview: Node3D  # the miniature in the map pit
 var _table_label: Label3D
 var _panel: PanelContainer
-var _title: Label
+var _head: VBoxContainer  # the open panel's header
 var _content: VBoxContainer
 var _status: Label
 
@@ -68,6 +73,7 @@ func _ready() -> void:
 	add_child(player)
 	player.station_used.connect(_on_station_used)
 	player.ui_closed.connect(_hide_panel)
+	_add_scoreboard()
 	_build_ui()
 	set_seed(randi() % 1000000)
 
@@ -80,7 +86,7 @@ func _process(_d: float) -> void:
 			what = STATIONS[body.get_meta("station_id")]["name"]
 		elif body.is_in_group("shootable"):
 			what = MAP_BUTTONS[body.get_meta("action")]["name"]
-	_prompt.text = "E / shoot: %s" % what if what != "" else ""
+	_prompt.text = "[E]  %s" % what if what != "" else ""
 
 # --- the room ---
 
@@ -254,24 +260,66 @@ func _mini_marker(parent: Node3D, pos: Vector3, radius: float, height: float, co
 	c.height = height
 	_mini_mesh(parent, c, Vector3.ONE, pos + Vector3(0, height / 2.0, 0), color)
 
+# --- the wall scoreboard ---
+
+# What the board shows, as [caption, value] pairs, from the profile's lifetime stats.
+func scoreboard_rows() -> Array:
+	var s: Dictionary = profile.stats
+	var acc: int = profile.accuracy()
+	var runs: int = s["runs"]
+	return [["RUNS", str(runs)], ["EXTRACTED", str(s["extracts"])], ["KILLED IN ACTION", str(s["deaths"])],
+		["SURVIVAL", "-" if runs == 0 else "%d%%" % int(round(100.0 * s["extracts"] / runs))],
+		["KILLS", str(s["kills"])], ["SHOTS FIRED", str(s["shots"])],
+		["ACCURACY", "-" if acc < 0 else "%d%%" % acc], ["DEEPEST LEVEL", str(s["deepest"])]]
+
+# A board on the north wall beside the raid terminal: two rows of four big numbers.
+func _add_scoreboard() -> void:
+	var cx := 5.5
+	var z := -HALF_D + 0.05
+	_box(Vector3(6.4, 2.9, 0.04), Vector3(cx, 2.1, z), UIKit.AMBER)  # the frame
+	_box(Vector3(6.2, 2.7, 0.06), Vector3(cx, 2.1, z + 0.02), Color(0.04, 0.045, 0.06))
+	var title := Label3D.new()
+	title.text = "RAID LEDGER"
+	title.font = UIKit.bold()
+	title.font_size = 96
+	title.pixel_size = 0.004
+	title.modulate = UIKit.AMBER
+	title.position = Vector3(cx, 3.12, z + 0.07)
+	add_child(title)
+	var rows := scoreboard_rows()
+	for i in rows.size():
+		var x := cx - 2.3 + (i % 4) * 1.53
+		var y := 2.45 - (i / 4) * 1.15
+		var value := Label3D.new()
+		value.text = rows[i][1]
+		value.font = UIKit.bold()
+		value.font_size = 120
+		value.pixel_size = 0.004
+		value.position = Vector3(x, y, z + 0.07)
+		add_child(value)
+		var caption := Label3D.new()
+		caption.text = rows[i][0]
+		caption.font_size = 36
+		caption.pixel_size = 0.004
+		caption.modulate = UIKit.DIM
+		caption.position = Vector3(x, y - 0.38, z + 0.07)
+		add_child(caption)
+
 # --- panels ---
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	var hint := Label.new()
-	hint.text = "BASE - WASD move, E or shoot (click) a station to use it, shoot the < ? > panels hovering over the map pit to change the map, Esc closes a panel. Ammo is free here."
+	var hint := UIKit.label("WASD MOVE    E / CLICK USE A STATION    SHOOT THE  < ? >  PANELS TO CHANGE MAP    ESC CLOSE", 13, UIKit.DIM)
 	hint.position = Vector2(16, 12)
 	layer.add_child(hint)
-	_prompt = Label.new()
-	_prompt.add_theme_font_size_override("font_size", 22)
+	_prompt = UIKit.label("", 24, UIKit.AMBER, true)
 	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	layer.add_child(_prompt)
 	_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_prompt.offset_top = 50
-	var cross := Label.new()
-	cross.text = "+"
+	var cross := UIKit.label("+", 16, UIKit.AMBER)
 	layer.add_child(cross)
 	cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 
@@ -281,26 +329,20 @@ func _build_ui() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_panel = PanelContainer.new()
 	_panel.visible = false
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.1, 0.1, 0.13, 0.97)
-	bg.set_content_margin_all(16)
-	_panel.add_theme_stylebox_override("panel", bg)
 	center.add_child(_panel)
 	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(520, 0)
-	box.add_theme_constant_override("separation", 8)
+	box.custom_minimum_size = Vector2(760, 0)
+	box.add_theme_constant_override("separation", 12)
 	_panel.add_child(box)
-	_title = Label.new()
-	_title.add_theme_font_size_override("font_size", 28)
-	box.add_child(_title)
+	_head = VBoxContainer.new()
+	box.add_child(_head)
 	_content = VBoxContainer.new()
-	_content.add_theme_constant_override("separation", 6)
+	_content.add_theme_constant_override("separation", 10)
 	box.add_child(_content)
-	_status = Label.new()
-	_status.modulate = Color(1, 0.8, 0.3)
+	_status = UIKit.label("", 14, UIKit.AMBER)
 	box.add_child(_status)
 	var close := Button.new()
-	close.text = "Close (Esc)"
+	close.text = "CLOSE  [ESC]"
 	close.pressed.connect(_close)
 	box.add_child(close)
 
@@ -310,7 +352,14 @@ func _on_station_used(station: Node) -> void:
 		return
 	open_station = station.get_meta("station_id")
 	_status.text = ""
-	_title.text = STATIONS[open_station]["name"]
+	var accent: Color = STATIONS[open_station]["color"]
+	accent.a = 1.0
+	_panel.theme = UIKit.theme(accent)
+	_panel.add_theme_stylebox_override("panel", UIKit.slab(UIKit.BG, accent, 10, 20))
+	for c in _head.get_children():
+		_head.remove_child(c)
+		c.queue_free()
+	_head.add_child(UIKit.header(STATIONS[open_station]["name"], STATION_TAGLINES[open_station], accent))
 	_panel.visible = true
 	_refresh()
 	player.inventory_open = true  # in the base this flag means "a panel has the mouse"
@@ -341,13 +390,22 @@ func _commit() -> void:
 	_status.text = "" if profile.save() else "WARNING: could not save your profile."
 	_refresh()
 
-func _label(text: String, font_size := 16) -> Label:
-	var l := Label.new()
-	l.text = text
+func _accent() -> Color:
+	var c: Color = STATIONS[open_station]["color"]
+	c.a = 1.0
+	return c
+
+func _label(text: String, font_size := 16, color := UIKit.TEXT) -> Label:
+	var l := UIKit.label(text, font_size, color)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	l.add_theme_font_size_override("font_size", font_size)
 	_content.add_child(l)
 	return l
+
+func _row(parent: Node = null, gap := 8) -> HBoxContainer:
+	var r := HBoxContainer.new()
+	r.add_theme_constant_override("separation", gap)
+	(parent if parent != null else _content).add_child(r)
+	return r
 
 func _button(parent: Node, text: String, on_press: Callable, disabled := false) -> Button:
 	var b := Button.new()
@@ -380,77 +438,127 @@ func _spend(id: String) -> void:
 		_commit()
 
 func _fill_stash() -> void:
-	_label("Extractions: %d    Frags: %d" % [profile.stats["extracts"], profile.stats["kills"]])
+	var a := _accent()
+	var row := _row()
+	row.add_child(UIKit.tile("extractions", str(profile.stats["extracts"]), a))
+	row.add_child(UIKit.tile("frags", str(profile.stats["kills"]), a))
+	var count := 0
+	for id in profile.totals:
+		count += int(profile.totals[id])
+	row.add_child(UIKit.tile("items stored", str(count), a))
 	if profile.totals.is_empty():
-		_label("The stash is empty. Extract loot from a raid to fill it.")
+		_label("Nothing stored yet. Extract loot from a raid and it lands here.", 16, UIKit.DIM)
 		return
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	_content.add_child(grid)
 	var ids: Array = profile.totals.keys()
 	ids.sort()
 	for id in ids:
-		var row := HBoxContainer.new()
-		var icon := ItemIcon.new()
-		icon.custom_minimum_size = Vector2(28, 28)
-		icon.item_id = id
-		row.add_child(icon)
-		var l := Label.new()
-		l.text = "%s x%d" % [str(id).replace("_", " "), profile.totals[id]]
-		row.add_child(l)
-		_content.add_child(row)
+		grid.add_child(UIKit.item_tile(id, profile.totals[id], a))
 
 func _fill_armory() -> void:
-	_label("Stash: %s" % (_cost_text(profile.totals) if not profile.totals.is_empty() else "empty"))
+	var a := _accent()
+	_label("STASH   %s" % (_cost_text(profile.totals).to_upper() if not profile.totals.is_empty() else "EMPTY"), 13, UIKit.DIM)
+	var most := {"damage": 1.0, "clip": 1.0, "range": 1.0}  # the best of each stat, so the meters compare weapons
+	for id in WeaponData.DATA:
+		var w: Dictionary = WeaponData.DATA[id]
+		most["damage"] = maxf(most["damage"], w["damage"] * w["pellets"] * (1.0 + Upgrades.WEAPON_MAX_LEVEL * Upgrades.WEAPON_DAMAGE_PER_LEVEL))
+		most["clip"] = maxf(most["clip"], w["clip"])
+		most["range"] = maxf(most["range"], w["effective"])
+	var cards := _row(null, 12)
 	for id in WeaponData.DATA:
 		var w: Dictionary = WeaponData.DATA[id]
 		var level: int = profile.weapon_level(id)
-		_label("%s   level %d/%d%s" % [w["name"], level, Upgrades.WEAPON_MAX_LEVEL, "   (starting weapon)" if profile.equipped == id else ""], 20)
-		var dmg := int(round(w["damage"] * profile.damage_mult(id)))
-		_label("%d x %d damage, %d-round clip, full damage to %d m" % [dmg, w["pellets"], w["clip"], w["effective"]])
-		var row := HBoxContainer.new()
-		_content.add_child(row)
-		_button(row, "Take into raids" if profile.equipped != id else "Equipped", _equip.bind(id), profile.equipped == id)
+		var equipped: bool = profile.equipped == id
+		var card := PanelContainer.new()
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a if equipped else Color(1, 1, 1, 0.15), 6, 14))
+		cards.add_child(card)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 8)
+		card.add_child(v)
+		v.add_child(UIKit.label(str(w["name"]).to_upper(), 26, UIKit.TEXT, true))
+		v.add_child(UIKit.pips(level, Upgrades.WEAPON_MAX_LEVEL, a))
+		var dmg: float = w["damage"] * w["pellets"] * profile.damage_mult(id)
+		for stat in [["DAMAGE", dmg / most["damage"], "%d x %d" % [int(round(w["damage"] * profile.damage_mult(id))), w["pellets"]]],
+				["CLIP", w["clip"] / most["clip"], str(w["clip"])], ["RANGE", w["effective"] / most["range"], "%d m" % w["effective"]]]:
+			var line := _row(v)
+			var cap := UIKit.label(stat[0], 12, UIKit.DIM)
+			cap.custom_minimum_size = Vector2(62, 0)
+			line.add_child(cap)
+			line.add_child(UIKit.meter(stat[1], a, 90))
+			line.add_child(UIKit.label(stat[2], 13))
+		var equip := _button(v, "EQUIPPED" if equipped else "TAKE INTO RAIDS", _equip.bind(id), equipped)
+		if equipped:
+			UIKit.mark_chosen(equip, a)
 		var cost: Dictionary = profile.upgrade_cost(id)
-		_button(row, "Upgrade (%s)" % _cost_text(cost) if not cost.is_empty() else "Max level", _upgrade.bind(id),
+		_button(v, ("UPGRADE  " + _cost_text(cost).to_upper()) if not cost.is_empty() else "MAX LEVEL", _upgrade.bind(id),
 			cost.is_empty() or not profile.can_afford(cost))
 
 func _fill_character() -> void:
-	_label("Attribute points: %d" % profile.points, 20)
-	_label("Earn points by extracting: %d per raid, and 1 more for every %d frags in it." % [Upgrades.POINTS_PER_EXTRACT, Upgrades.KILLS_PER_POINT])
+	var a := _accent()
+	var top := _row(null, 14)
+	top.add_child(UIKit.label(str(profile.points), 56, UIKit.AMBER, true))
+	var cap := VBoxContainer.new()
+	cap.alignment = BoxContainer.ALIGNMENT_CENTER
+	top.add_child(cap)
+	cap.add_child(UIKit.label("ATTRIBUTE POINTS", 18, UIKit.TEXT, true))
+	cap.add_child(UIKit.label("%d per extract, +1 for every %d frags in it" % [Upgrades.POINTS_PER_EXTRACT, Upgrades.KILLS_PER_POINT], 12, UIKit.DIM))
 	for id in Upgrades.ATTRS:
-		var a: Dictionary = Upgrades.ATTRS[id]
+		var at: Dictionary = Upgrades.ATTRS[id]
 		var level: int = profile.attr_level(id)
-		var row := HBoxContainer.new()
-		_content.add_child(row)
-		var l := Label.new()
-		l.text = "%s  %d/%d   (%s)" % [a["name"], level, a["max"], a["desc"]]
-		l.custom_minimum_size = Vector2(400, 0)
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		row.add_child(l)
-		_button(row, "+", _spend.bind(id), profile.points <= 0 or level >= int(a["max"]))
-	_label("Max health %d   armor %.0f%%   speed x%.2f   reload x%.2f" % [
-		profile.max_health(Player.MAX_HEALTH), profile.armor() * 100.0, profile.speed_mult(), profile.reload_mult()])
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a, 5, 12))
+		_content.add_child(card)
+		var line := _row(card, 14)
+		var names := VBoxContainer.new()
+		names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		line.add_child(names)
+		names.add_child(UIKit.label(str(at["name"]).to_upper(), 20, UIKit.TEXT, true))
+		names.add_child(UIKit.label(at["desc"], 12, UIKit.DIM))
+		line.add_child(UIKit.pips(level, int(at["max"]), a))
+		var plus := _button(line, "+", _spend.bind(id), profile.points <= 0 or level >= int(at["max"]))
+		plus.custom_minimum_size = Vector2(48, 40)
+	var sums := _row()
+	sums.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a))
+	sums.add_child(UIKit.tile("armor", "%.0f%%" % (profile.armor() * 100.0), a))
+	sums.add_child(UIKit.tile("speed", "x%.2f" % profile.speed_mult(), a))
+	sums.add_child(UIKit.tile("reload", "x%.2f" % profile.reload_mult(), a))
 
 func _fill_map() -> void:
-	_label("Next raid: map %d" % selected_seed, 20)
+	var a := _accent()
 	var d := preview_data
-	_label("%.0f x %.0f m   |   %d loot rooms   |   %d enemy bases   |   %d patrols   |   %d cover pieces" % [
-		d["w"], d["d"], d["rooms"], d["spawners"].size(), d["groups"].size(), d["cover"]])
-	_label("In the pit: green beam = safe extraction, amber = fast extraction, red beams = enemy bases, orange dots = patrols. Every map number is a different layout.")
-	var row := HBoxContainer.new()
-	_content.add_child(row)
-	_button(row, "< Previous", _step_seed.bind(-1), selected_seed <= 0)
-	_button(row, "Next >", _step_seed.bind(1))
-	_button(row, "Random map", _random_seed)
-	var entry := HBoxContainer.new()
-	_content.add_child(entry)
-	var l := Label.new()
-	l.text = "Map number:"
-	entry.add_child(l)
+	_row().add_child(UIKit.label("MAP %d" % selected_seed, 44, UIKit.AMBER, true))
+	var tiles := _row()
+	tiles.add_child(UIKit.tile("size", "%.0fx%.0f" % [d["w"], d["d"]], a))
+	tiles.add_child(UIKit.tile("loot rooms", str(d["rooms"]), a))
+	tiles.add_child(UIKit.tile("enemy bases", str(d["spawners"].size()), UIKit.BAD))
+	tiles.add_child(UIKit.tile("patrols", str(d["groups"].size()), a))
+	tiles.add_child(UIKit.tile("cover", str(d["cover"]), a))
+	var legend := _row(null, 18)
+	for entry in [["SAFE EXTRACT", Color(0.2, 1, 0.3)], ["FAST EXTRACT", Color(1, 0.6, 0.1)], ["ENEMY BASE", Color(1, 0.15, 0.1)], ["PATROL", Color(1, 0.6, 0.1)]]:
+		var key := _row(legend, 6)
+		var swatch := ColorRect.new()
+		swatch.color = entry[1]
+		swatch.custom_minimum_size = Vector2(14, 14)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		key.add_child(swatch)
+		key.add_child(UIKit.label(entry[0], 12, UIKit.DIM))
+	var row := _row()
+	_button(row, "< PREVIOUS", _step_seed.bind(-1), selected_seed <= 0)
+	_button(row, "NEXT >", _step_seed.bind(1))
+	_button(row, "RANDOM MAP", _random_seed)
+	var entry := _row()
+	entry.add_child(UIKit.label("MAP NUMBER", 12, UIKit.DIM))
 	var field := LineEdit.new()
 	field.text = str(selected_seed)
 	field.custom_minimum_size = Vector2(120, 0)
 	field.text_submitted.connect(_enter_seed)
 	entry.add_child(field)
-	_button(entry, "Go", func(): _enter_seed(field.text))
+	_button(entry, "GO", func(): _enter_seed(field.text))
 
 func _step_seed(delta: int) -> void:
 	set_seed(selected_seed + delta)
@@ -466,21 +574,34 @@ func _enter_seed(text: String) -> void:
 	_refresh()
 
 func _fill_raid() -> void:
-	_label("Map: %d (change it at the map pit)    Starting weapon: %s" % [selected_seed, WeaponData.DATA[profile.equipped]["name"]])
-	_label("RAID DIFFICULTY   reward x%.2f" % profile.reward_mult(), 20)
-	_label("Harder options scale the loot you keep and the attribute points an extract earns. Easier ones shrink them.")
+	var a := _accent()
+	var mult: float = profile.reward_mult()
+	var tiles := _row()
+	tiles.add_child(UIKit.tile("map (change at the pit)", str(selected_seed), a))
+	tiles.add_child(UIKit.tile("starting weapon", str(WeaponData.DATA[profile.equipped]["name"]).to_upper(), a))
+	tiles.add_child(UIKit.tile("reward", "x%.2f" % mult, UIKit.GOOD if mult > 1.0 else (UIKit.BAD if mult < 1.0 else UIKit.TEXT)))
+	_label("RISK DIAL  -  harder options pay more loot and more attribute points; easier ones pay less", 12, UIKit.DIM)
 	for id in Difficulty.OPTIONS:
 		var opt: Dictionary = Difficulty.OPTIONS[id]
-		_label("%s - %s" % [opt["name"], opt["desc"]])
-		var row := HBoxContainer.new()
-		_content.add_child(row)
+		var line := _row(null, 12)
+		var names := VBoxContainer.new()
+		names.custom_minimum_size = Vector2(250, 0)
+		line.add_child(names)
+		names.add_child(UIKit.label(str(opt["name"]).to_upper(), 16, UIKit.TEXT, true))
+		var desc := UIKit.label(opt["desc"], 11, UIKit.DIM)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		names.add_child(desc)
 		for i in opt["levels"].size():
 			var level: Dictionary = opt["levels"][i]
 			var reward := float(level["reward"])
 			var text: String = level["label"] if reward == 0.0 else "%s (%+d%%)" % [level["label"], int(round(reward * 100.0))]
-			_button(row, text, _set_difficulty.bind(id, i), profile.difficulty_level(id) == i)
-	var b := _button(_content, "START RAID", _start)
-	b.custom_minimum_size = Vector2(0, 60)
+			var chip := _button(line, text, _set_difficulty.bind(id, i), profile.difficulty_level(id) == i)
+			chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			if profile.difficulty_level(id) == i:
+				UIKit.mark_chosen(chip, a)
+	var b := UIKit.big_button("START RAID", a, 72)
+	b.pressed.connect(_start)
+	_content.add_child(b)
 	b.grab_focus()  # Enter / Space also start the raid
 
 func _set_difficulty(id: String, level: int) -> void:

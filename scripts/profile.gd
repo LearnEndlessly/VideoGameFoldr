@@ -16,7 +16,10 @@ var equipped := "pistol"  # the weapon held at the start of a raid
 var attrs := {}  # attribute id -> level (missing = 0)
 var points := 0  # unspent attribute points
 var difficulty := {}  # raid difficulty option id -> level index (missing = Normal); see data/difficulty.gd
-var stats := {"extracts": 0, "kills": 0}  # lifetime, successful raids only
+# Lifetime scoreboard numbers. "runs" counts runs (a descent is part of the run it came from), "deepest" is the deepest level reached
+# (1 = the first), "hits" counts shots that hurt something, so hits / shots is the accuracy.
+const STAT_DEFAULTS := {"runs": 0, "extracts": 0, "deaths": 0, "kills": 0, "shots": 0, "hits": 0, "deepest": 1}
+var stats := STAT_DEFAULTS.duplicate()
 
 func _init(file_path: String = Tuning.PROFILE_PATH) -> void:
 	path = file_path
@@ -28,7 +31,7 @@ func load_from_disk() -> void:
 	attrs = {}
 	points = 0
 	difficulty = {}
-	stats = {"extracts": 0, "kills": 0}
+	stats = STAT_DEFAULTS.duplicate()
 	if not FileAccess.file_exists(path):
 		return
 	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
@@ -62,11 +65,34 @@ func load_from_disk() -> void:
 				difficulty[str(id)] = Difficulty.level_of(dd, str(id))
 	var s = data.get("stats")
 	if typeof(s) == TYPE_DICTIONARY:
-		stats = {"extracts": int(s.get("extracts", 0)), "kills": int(s.get("kills", 0))}
+		for k in STAT_DEFAULTS:
+			stats[k] = maxi(int(s.get(k, STAT_DEFAULTS[k])), 0)
 
 func add_items(items: Dictionary) -> void:
 	for id in items:
 		totals[id] = totals.get(id, 0) + int(items[id])
+
+# Takes loot back out of the stash (descending carries it into the next level).
+func take_items(items: Dictionary) -> void:
+	for id in items:
+		totals[id] = int(totals.get(id, 0)) - int(items[id])
+		if totals[id] <= 0:
+			totals.erase(id)
+
+# Every finished raid, win or lose, goes on the scoreboard. `level` is 1 for a raid started at the base.
+func record_raid(extracted: bool, kills: int, shots: int, hits: int, level: int) -> void:
+	if level <= 1:
+		stats["runs"] += 1
+	if not extracted:
+		stats["deaths"] += 1
+	stats["kills"] += kills
+	stats["shots"] += shots
+	stats["hits"] += hits
+	stats["deepest"] = maxi(stats["deepest"], level)
+
+# Percent of shots that hurt something, -1 before the first shot.
+func accuracy() -> int:
+	return -1 if stats["shots"] <= 0 else int(round(100.0 * stats["hits"] / stats["shots"]))
 
 # A successful extract: bank the points it earned (see data/upgrades.gd, scaled by the raid's reward
 # multiplier) and the lifetime stats. Returns the points gained.
@@ -74,7 +100,6 @@ func record_extract(kills: int, reward_mult := 1.0) -> int:
 	var gained := Difficulty.scale(Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT, reward_mult)
 	points += gained
 	stats["extracts"] += 1
-	stats["kills"] += kills
 	return gained
 
 # --- weapons ---
