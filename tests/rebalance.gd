@@ -71,31 +71,15 @@ func _run() -> void:
 	_check(per_ammo_scatter > 1.5 * per_ammo_pistol, "scattergun should be much better per ammo up close")
 	_check(scatter["effective"] < 0.5 * pistol["effective"], "scattergun should have well under half the pistol's range")
 
-	# Crafting.
+	# Crafting has no recipes now that scrap is gone, but the request path still refuses cleanly.
 	var main = await _new_raid(1)
 	var player = main._player
-	var fed: Array = []
-	main.raid.picked_up.connect(func(id, _qty): fed.append(id))
 	player.inventory.clear()
-	player.inventory.add("scrap", 9)
-	_check(not main.raid.request_craft("medkit"), "craft: 9 scrap must not be enough")
-	_check(player.inventory.count("scrap") == 9 and player.inventory.count("medkit") == 0, "craft: a refused craft changed the backpack")
-	player.inventory.add("scrap", 6)  # 15 scrap
-	_check(main.raid.request_craft("medkit"), "craft: 15 scrap should craft a medkit")
-	_check(player.inventory.count("scrap") == 5 and player.inventory.count("medkit") == 1, "craft: wrong result, scrap %d medkit %d" % [player.inventory.count("scrap"), player.inventory.count("medkit")])
-	_check(fed == ["medkit"], "craft: the result should be announced like a pickup")
+	player.inventory.add("medkit", 2)
+	_check(not main.raid.request_craft("medkit"), "craft: with no recipes nothing can be crafted")
 	_check(not main.raid.request_craft("not_a_thing"), "craft: unknown recipe must be refused")
-	# Through the player's click path.
-	player.inventory.clear()
-	player.inventory.add("scrap", 12)
-	player.use_slot(0)
-	_check(player.inventory.count("medkit") == 1 and player.inventory.count("scrap") == 2, "craft: clicking scrap should craft")
-	# No room for the result: ingredients come back.
-	player.inventory.clear()
-	player.inventory.add("scrap", 15)
-	player.inventory.add("medkit", 3 * (Inventory.SLOTS - 1))  # every other slot full of medkits
-	_check(not main.raid.request_craft("medkit"), "craft: a full backpack must refuse")
-	_check(player.inventory.count("scrap") == 15, "craft: a refused full-backpack craft must give the scrap back")
+	player.use_slot(0)  # a click on a medkit at full health must not craft or consume anything
+	_check(player.inventory.count("medkit") == 2, "craft: using a medkit at full health must not consume it")
 	# Kills are reported on the results screen data.
 	var results: Array = []
 	main.raid.ended.connect(func(r): results.append(r))
@@ -112,6 +96,8 @@ func _run() -> void:
 	player.set_physics_process(false)
 	player.global_position = Vector3(0, 50, 0)
 	var seer = _enemy_at(main, Vector3(0, 50, -12))
+	seer.set_physics_process(false)  # keep it facing the player (+Z) so only the wall decides
+	seer.rotation.y = PI
 	var wall := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()

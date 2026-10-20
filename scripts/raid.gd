@@ -8,6 +8,7 @@ const Tuning = preload("res://data/tuning.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Recipes = preload("res://data/recipes.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
+const Pickup = preload("res://scripts/pickup.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -42,6 +43,7 @@ var reload_weapon := ""  # weapon being reloaded, "" if none
 var reload_left := 0.0
 
 var _threat_reached := false
+var _drop_rng := RandomNumberGenerator.new()  # enemy drops; seeded per raid so a test can replay them
 var _player
 var _fire_cooldown := 0.0
 var _sample_clock := Telemetry.SAMPLE_SECONDS  # starts full so the first sample is logged at once
@@ -50,6 +52,7 @@ var _wave_left := 0.0
 
 func setup(player) -> void:
 	_player = player
+	_drop_rng.seed = seed_value
 	player.died.connect(_on_player_died)
 	if Tuning.STARTING_AMMO > 0:
 		brought["ammo"] = Tuning.STARTING_AMMO - player.inventory.add("ammo", Tuning.STARTING_AMMO)
@@ -145,10 +148,38 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 			if "stats" in enemy:  # only enemies carry type/modifier
 				kill_info = {"id": enemy.stats["type"], "mod": enemy.stats["modifier"], "group": enemy.group_id,
 					"weapon": weapon_id, "range": aim.origin.distance_to(hit["position"]), "pos": enemy.global_position}
-			if enemy.take_damage(dmg):
+			if enemy.take_damage(dmg) and "stats" in enemy:  # the enemy base dying is not a kill
 				_player.kills += 1
 				Telemetry.emit("player.kill.enemy", kill_info)
+				_drop_ammo(enemy.global_position, enemy.stats)
 	Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "fired", "hits": hits, "dmg": total_dmg, "ammo_left": _player.inventory.count(item)})
+	return true
+
+# Rolls an enemy's ammo drop (data/enemies.gd) and, on success, leaves a pickup where it died.
+func _drop_ammo(pos: Vector3, stats: Dictionary) -> bool:
+	if _drop_rng.randf() >= float(stats.get("drop_chance", 0.0)):
+		return false
+	var amount: Array = stats["drop"]
+	var pickup := Pickup.new()
+	pickup.id = "ammo"
+	pickup.qty = _drop_rng.randi_range(amount[0], amount[1])
+	pickup.position = pos
+	get_parent().add_child.call_deferred(pickup)  # a kill happens inside the physics step, where new areas cannot be added
+	return true
+
+# The player walked into a pickup: move what fits into the backpack; the rest stays on the ground.
+func request_pickup(pickup) -> bool:
+	if state != State.ACTIVE or not is_instance_valid(pickup) \
+			or _player.global_position.distance_to(pickup.global_position) > Tuning.LOOT_REACH:
+		return false
+	var left: int = _player.inventory.add(pickup.id, pickup.qty)
+	if left == pickup.qty:
+		inventory_full.emit()
+		return false
+	picked_up.emit(pickup.id, pickup.qty - left)
+	pickup.qty = left
+	if left == 0:
+		pickup.queue_free()
 	return true
 
 # The player is standing in the extract zone. Starts (or continues) the hold timer.

@@ -3,6 +3,7 @@ extends RefCounted
 # the only way loot gets in is add_items() after a successful extract.
 
 const Tuning = preload("res://data/tuning.gd")
+const Loot = preload("res://data/loot.gd")
 
 var path: String
 var totals := {}  # item id -> quantity kept across all raids
@@ -21,6 +22,8 @@ func load_from_disk() -> void:
 		DirAccess.copy_absolute(path, path + ".bad")
 		return
 	for id in data["totals"]:
+		if not Loot.ITEMS.has(str(id)):  # an item removed from the game (e.g. scrap) is dropped from old saves
+			continue
 		totals[str(id)] = int(data["totals"][id])
 
 func add_items(items: Dictionary) -> void:

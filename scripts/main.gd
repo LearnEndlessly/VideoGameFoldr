@@ -17,6 +17,7 @@ const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
 const AmmoBar = preload("res://scripts/ammo_bar.gd")
 const Crosshair = preload("res://scripts/crosshair.gd")
+const Spawner = preload("res://scripts/spawner.gd")
 
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
@@ -42,6 +43,7 @@ var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep
 var _cover: Array = []  # centres of placed cover boxes
 var _guard_pos = null  # Vector3 home of the group guarding Tuning.GUARDED_ZONE, or null
 var _player: Player
+var _spawners: Array = []  # the enemy bases (Spawner); each is freed when destroyed
 var _zone_mat := StandardMaterial3D.new()
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
 var _hud: Label
@@ -102,7 +104,7 @@ func _build_raid() -> void:
 	for g in Tuning.ENEMY_GROUP_COUNT:
 		var guard = _guard_pos if g == 0 else null
 		var center: Vector3 = guard if guard != null else _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
-		for i in rng.randi_range(3, 4):
+		for i in rng.randi_range(Tuning.ENEMY_GROUP_SIZE_MIN, Tuning.ENEMY_GROUP_SIZE_MAX):
 			var e := Enemy.new()
 			e.stats = Enemies.roll(rng)
 			e.home = center
@@ -110,6 +112,8 @@ func _build_raid() -> void:
 			var spread: float = Tuning.GROUP_SPREAD
 			e.position = center + Vector3(rng.randf_range(-spread, spread), 0, rng.randf_range(-spread, spread))
 			add_child(e)
+	for i in Tuning.SPAWNER_COUNT:
+		_place_spawner(i)
 	_place_shelters()
 	for i in COVER_ATTEMPTS:
 		_place_cover()
@@ -259,8 +263,10 @@ func _process(_d: float) -> void:
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
 	_update_status_hud()
-	_hud.text = "%s %s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else ""]
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." % hold
+	var left := _spawners.filter(is_instance_valid).size()
+	var base := "Enemy bases left: %d" % left if left > 0 else "ALL ENEMY BASES DESTROYED"
+	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", base]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Hold the green zone for %.0f s to extract." % hold
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -344,7 +350,18 @@ func _map_info() -> Dictionary:
 		elif c.is_in_group("lootable"):
 			crates.append({"zone": c.zone_id, "pos": c.position})
 	return {"w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "shelters": shelters,
-		"zones": zones, "enemies": enemies, "crates": crates}
+		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
+
+# An enemy base: a small footprint reserved like a group, far from the start. See scripts/spawner.gd.
+func _place_spawner(index: int) -> void:
+	var pos: Vector3 = _free_spot(2.0, 2.0, Tuning.SPAWNER_MIN_ORIGIN)
+	var sp := Spawner.new()
+	sp.position = pos
+	sp.group_id = Tuning.ENEMY_GROUP_COUNT + index
+	sp.rng_seed = rng.randi()
+	add_child(sp)
+	_spawners.append(sp)
+	solids.append(Rect2(Vector2(pos.x - 1.0, pos.z - 1.0), Vector2(2, 2)))
 
 # --- map generation -------------------------------------------------------------
 
@@ -492,7 +509,7 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 			if _side_normal(s).dot(center.normalized()) < 0.0:
 				door_sides.append(s)
 		door_side = door_sides[rng.randi_range(0, door_sides.size() - 1)] if not door_sides.is_empty() else rng.randi_range(0, 3)
-	_add_room(center, size, door_side, 4.0, 2.8, 0.5, zone["wall_color"])
+	_add_room(center, size, door_side, float(zone["door"]), 2.8, 0.5, zone["wall_color"])
 	var floor_mark := MeshInstance3D.new()
 	var fm := BoxMesh.new()
 	fm.size = Vector3(size - 1.0, 0.02, size - 1.0)
@@ -509,24 +526,29 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 	label.position = center + Vector3(0, 4.5, 0)
 	add_child(label)
 
-	# Crates: inside the walls, apart from each other and away from the doorway.
+	# Crates: against the inside walls (never the door's wall) and apart from each other, so the middle
+	# and the doorway stay clear. A crate is 1 m wide and the walls are 0.5 m thick.
 	var door_point := center + _side_normal(door_side) * (size / 2.0)
-	var inner := size / 2.0 - 0.5 - 1.2
+	var edge := size / 2.0 - 1.05
+	var entry := center + _side_normal(door_side) * (size / 2.0 - 1.0) + Vector3(0, 0.5, 0)  # 1 m inside the doorway
 	var spots: Array = []
 	var crate_range: Array = zone["crates"]
-	for i in rng.randi_range(crate_range[0], crate_range[1]):
-		for attempt in 40:
-			var p := center + Vector3(rng.randf_range(-inner, inner), 0.5, rng.randf_range(-inner, inner))
-			if p.distance_to(door_point) < 2.5:
-				continue
-			var ok := true
-			for s in spots:
-				if p.distance_to(s) < 2.0:
-					ok = false
+	for round in 10:  # a first crate can leave no room for the next one in a small room: start over
+		spots = []
+		for i in rng.randi_range(crate_range[0], crate_range[1]):
+			for attempt in 40:
+				var side := rng.randi_range(0, 3)
+				if side == door_side:
+					continue
+				var along := Vector3(1, 0, 0) if side < 2 else Vector3(0, 0, 1)
+				var p := center + _side_normal(side) * edge + along * rng.randf_range(-edge, edge) + Vector3(0, 0.5, 0)
+				if p.distance_to(entry) < 1.6:  # keep the way in clear
+					continue
+				if spots.all(func(s): return p.distance_to(s) >= 1.2):
+					spots.append(p)
 					break
-			if ok:
-				spots.append(p)
-				break
+		if spots.size() >= int(crate_range[0]):
+			break
 	for p in spots:
 		var c := Crate.new()
 		c.seed_value = rng.randi()

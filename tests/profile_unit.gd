@@ -14,17 +14,26 @@ func _init() -> void:
 	a.load_from_disk()
 	if not a.totals.is_empty():
 		failures.append("missing file must give an empty profile")
-	a.add_items({"scrap": 3, "medkit": 1})
+	a.add_items({"ammo": 3, "medkit": 1})
 	if not a.save():
 		failures.append("first save failed")
-	a.add_items({"scrap": 2})
+	a.add_items({"ammo": 2})
 	if not a.save():
 		failures.append("second save (overwrite) failed")
 
 	var b := Profile.new(PATH)
 	b.load_from_disk()
-	if b.totals != {"scrap": 5, "medkit": 1}:
+	if b.totals != {"ammo": 5, "medkit": 1}:
 		failures.append("reload gave %s" % [b.totals])
+
+	# An old save that holds a removed item (scrap) loads without it.
+	var old := FileAccess.open(PATH, FileAccess.WRITE)
+	old.store_string('{"version": 1, "totals": {"scrap": 7, "medkit": 2}}')
+	old.close()
+	var legacy := Profile.new(PATH)
+	legacy.load_from_disk()
+	if legacy.totals != {"medkit": 2}:
+		failures.append("a removed item must be dropped from old saves, got %s" % [legacy.totals])
 
 	var f := FileAccess.open(PATH, FileAccess.WRITE)
 	f.store_string("{not json")

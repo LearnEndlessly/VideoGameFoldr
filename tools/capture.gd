@@ -97,7 +97,7 @@ func _init() -> void:
 		await _shot("07_shelter_from_4m")
 
 	# Backpack open with a few items.
-	player.inventory.add("scrap", 12)
+	player.inventory.add("medkit", 2)
 	player.inventory.add("medkit", 2)
 	player.inventory_open = true
 	player.inventory_toggled.emit(true)

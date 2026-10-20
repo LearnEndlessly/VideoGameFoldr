@@ -5,8 +5,20 @@ const ENEMY_GROUP_MIN_ORIGIN := 20.0  # a fast grunt (7.2 m/s) needs over 2 s to
 # Group members spawn within +/- this many metres of their group centre.
 const GROUP_SPREAD := 2.0
 
-# How many patrol groups spawn (3-4 enemies each). Set to 5 for the old, busier maps.
+# How many patrol groups spawn, and how many enemies each (the old maps had 3-4 per group).
 const ENEMY_GROUP_COUNT := 3
+const ENEMY_GROUP_SIZE_MIN := 1
+const ENEMY_GROUP_SIZE_MAX := 2
+
+# Enemy bases: SPAWNER_COUNT small, unmarked, destroyable spawners, each at least SPAWNER_MIN_ORIGIN m from
+# the player's start. Every SPAWNER_INTERVAL seconds a base adds one enemy to its own group (home: the
+# base), while fewer than SPAWNER_MAX_ALIVE of that group are alive. Destroy a base and it stops for good.
+# The HUD only says how many are left; finding them is the player's job.
+const SPAWNER_COUNT := 4
+const SPAWNER_HEALTH := 100
+const SPAWNER_INTERVAL := 12.0
+const SPAWNER_MAX_ALIVE := 3
+const SPAWNER_MIN_ORIGIN := 25.0
 
 # Threat clock: THREAT_DELAY_SECONDS into a raid, every group stops patrolling and heads
 # for the player's position, with a HUD warning. They still need to see you to attack, and
@@ -18,7 +30,7 @@ const THREAT_DELAY_SECONDS := 120.0
 const THREAT_CONTINUOUS := true
 const THREAT_WAVE_SECONDS := 60.0
 # Placement attempts per object before overlapping other objects is accepted.
-const SPAWN_TRIES := 50
+const SPAWN_TRIES := 200
 
 # Map shape: the floor area is MAP_AREA m2, split into a width and depth by a random
 # aspect ratio between MAP_ASPECT_MIN and MAP_ASPECT_MAX (below 1 = taller than wide),
@@ -50,7 +62,19 @@ const PLAYER_JUMP_SPEED := 7.2
 # How enemies notice the player. Sight needs both range and a clear line of sight (walls
 # and tall cover block it). Sprinting is loud: it is heard through walls within
 # SPRINT_NOISE_RANGE. Once alert, an enemy keeps chasing until the player is 30 m away.
+# Sight is a view cone in front of the enemy (ENEMY_FOV_DEGREES wide, ENEMY_SIGHT_RANGE long), plus
+# a small all-round ENEMY_NEAR_SENSE circle. Being seen fills a suspicion meter over
+# ENEMY_DETECT_SECONDS; out of sight it drains over ENEMY_DETECT_DECAY_SECONDS. Full = the group is alerted.
+# Sprint noise fills the meter twice as fast. A shot alerts the group at once.
 const ENEMY_SIGHT_RANGE := 18.0
+const ENEMY_FOV_DEGREES := 100.0
+const ENEMY_NEAR_SENSE := 3.0
+const ENEMY_DETECT_SECONDS := 5.0
+const ENEMY_DETECT_DECAY_SECONDS := 3.0
+# While suspicious (meter above 0) an enemy stops patrolling: it faces the spot it last saw or heard
+# the player and creeps toward it at this fraction of its speed, stopping ENEMY_INVESTIGATE_STOP m short.
+const ENEMY_INVESTIGATE_SPEED := 0.3
+const ENEMY_INVESTIGATE_STOP := 6.0
 const SPRINT_NOISE_RANGE := 14.0
 
 # One enemy group is placed GUARD_DISTANCE metres outside the door of this loot area

@@ -108,7 +108,7 @@ func _run() -> void:
 	if events.size() > 0:
 		var first: Dictionary = events[0]
 		var map: Dictionary = first.get("map", {})
-		_check(map.get("zones", []).size() == 3, "map should list 3 loot zones")
+		_check(map.get("zones", []).size() == 2, "map should list 2 loot zones")
 		_check(map.get("crates", []).size() >= 4, "map should list the crates")
 		_check(map.get("enemies", []).size() > 0, "map should list the enemies")
 		_check(map.get("extract", []).size() == 2 and map.get("shelters", []).size() > 0, "map should list the extract zone and shelters")

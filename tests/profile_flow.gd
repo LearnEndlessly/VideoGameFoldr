@@ -8,7 +8,7 @@ extends SceneTree
 const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const PATH := "user://test_profile_flow.json"
-const EXPECTED := {"scrap": 3, "medkit": 1}
+const EXPECTED := {"ammo": 3, "medkit": 1}
 
 var failures: PackedStringArray = []
 
@@ -74,7 +74,7 @@ func _run() -> void:
 	var results: Array = []
 	main.raid.ended.connect(func(r): results.append(r))
 	var player = main._player
-	player.inventory.add("scrap", 3)
+	player.inventory.add("ammo", 3)
 	player.inventory.add("medkit", 1)
 	player.global_position = main.extract_pos
 	await _wait_until(func(): return results.size() > 0, 120)

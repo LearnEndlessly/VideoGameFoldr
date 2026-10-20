@@ -19,6 +19,8 @@ var group_id := 0
 var health := 1
 var max_health := 1
 var alert := false
+var suspicion := 0.0  # 0..1; fills while the player is seen or heard, full = alert
+var last_seen := Vector3.ZERO  # where the player was last seen or heard; a suspicious enemy looks and creeps here
 var converging := false          # the threat clock sent this enemy toward converge_target
 var converge_target := Vector3.ZERO
 
@@ -30,6 +32,8 @@ var _target := Vector3.ZERO
 var _model_meshes: Array = []  # MeshInstance3D nodes of the art model, if one is used
 var _mat := StandardMaterial3D.new()
 var _label := Label3D.new()
+var _cone_mat := StandardMaterial3D.new()
+var _cone: MeshInstance3D
 var _bar := Node3D.new()        # faces the camera each frame
 var _bar_fill: MeshInstance3D
 var _bar_width := 1.0
@@ -71,6 +75,7 @@ func _ready() -> void:
 	add_child(_label)
 	_update_label()
 	_build_bar(size)
+	_build_cone()
 
 # Health bar: the frame is blue for armored enemies, and the fill shrinks and
 # shifts from green to red as health drops.
@@ -84,6 +89,52 @@ func _build_bar(size: float) -> void:
 	_bar_fill.position.z = 0.01
 	_bar.add_child(frame)
 	_bar.add_child(_bar_fill)
+
+# A flat wedge on the ground showing where this enemy is looking: faint white, reddening as suspicion
+# fills. Its shape is rebuilt as the enemy moves so walls and cover cut it short, like its sight.
+func _build_cone() -> void:
+	_cone_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cone_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_cone_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_cone = MeshInstance3D.new()
+	_cone.mesh = ArrayMesh.new()
+	_cone.material_override = _cone_mat
+	_cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_cone)
+	_update_cone_shape()
+	_refresh_cone()
+
+const CONE_STEPS := 16
+
+func _update_cone_shape() -> void:
+	var half := deg_to_rad(Tuning.ENEMY_FOV_DEGREES / 2.0)
+	var pts := PackedVector3Array([Vector3(0, 0.05, 0)])
+	for i in CONE_STEPS + 1:
+		var dir := Vector3.FORWARD.rotated(Vector3.UP, lerpf(half, -half, float(i) / CONE_STEPS))
+		var p := dir * _ray_reach(dir)
+		pts.append(Vector3(p.x, 0.05, p.z))
+	var idx := PackedInt32Array()
+	for i in CONE_STEPS:
+		idx.append_array([0, i + 1, i + 2])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = pts
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh: ArrayMesh = _cone.mesh
+	mesh.clear_surfaces()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+# How far (m, up to the sight range) this enemy can see along `local_dir`, a flat direction in its own
+# frame, before a wall or cover stops it. Cast at eye height, like _has_line_of_sight.
+func _ray_reach(local_dir: Vector3) -> float:
+	var reach: float = Tuning.ENEMY_SIGHT_RANGE
+	var from := global_position + Vector3(0, 1.4 * float(stats["size"]), 0)
+	var hit := _first_solid(from, from + global_transform.basis * local_dir * reach)
+	return reach if hit.is_empty() else from.distance_to(hit["position"])
+
+func _refresh_cone() -> void:
+	_cone.visible = not alert
+	_cone_mat.albedo_color = Color(1, 1, 1, 0.12).lerp(Color(1, 0.25, 0.1, 0.4), suspicion)
 
 func _bar_quad(quad_size: Vector2, color: Color) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
@@ -108,6 +159,9 @@ func set_alert(on: bool) -> void:
 		return
 	alert = on
 	_lost_timer = 0.0
+	suspicion = 0.0
+	if _cone != null:
+		_refresh_cone()
 	if on:
 		Sfx.play("alert", global_position)
 	_mat.albedo_color = ALERT_COLOR if on else stats["color"]
@@ -168,8 +222,9 @@ func _physics_process(delta: float) -> void:
 		to_player.y = 0.0
 		dist = to_player.length()
 
-	if not alert and _notices(player, dist):
-		alert_pack("noise" if player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE else "sight")
+	if not alert:
+		_update_suspicion(player, dist, delta)
+		_update_cone_shape()
 
 	if alert:
 		if dist > LOSE:
@@ -193,6 +248,8 @@ func _physics_process(delta: float) -> void:
 		to_c.y = 0.0
 		if to_c.length() > CONVERGE_ARRIVE:
 			_walk(to_c, float(stats["speed"]))
+	elif suspicion > 0.0:
+		_investigate(delta)
 	else:
 		_repick -= delta
 		var to_target := _target - global_position
@@ -205,33 +262,79 @@ func _physics_process(delta: float) -> void:
 
 	velocity.y = velocity.y - 20.0 * delta if not is_on_floor() else 0.0
 	move_and_slide()
+	_turn(to_player if alert else Vector3(velocity.x, 0, velocity.z), delta)
 	_footsteps(delta, player)
 
-# A patrolling enemy notices the player by hearing them sprint (through walls, close
-# range) or by seeing them (longer range, needs a clear line of sight). dist is INF
-# when the player is sheltered, so neither works then.
+# A patrolling enemy perceives the player by hearing them sprint (through walls, close range) or by
+# seeing them (inside its view cone, in range, with a clear line of sight). dist is INF when the
+# player is sheltered, so neither works then. Perceiving is not alerting: see _update_suspicion.
 func _notices(player, dist: float) -> bool:
-	if player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE:
-		return true
-	return dist < Tuning.ENEMY_SIGHT_RANGE and _has_line_of_sight(player)
+	return _hears(player, dist) or _sees(player, dist)
 
-# Casts from this enemy's eyes to the player's chest. Walls and cover block it; other
-# enemies in the way do not.
+func _hears(player, dist: float) -> bool:
+	return player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE
+
+func _sees(player, dist: float) -> bool:
+	if dist >= Tuning.ENEMY_SIGHT_RANGE:
+		return false
+	var to_player: Vector3 = player.global_position - global_position
+	to_player.y = 0.0
+	var forward := -global_transform.basis.z
+	forward.y = 0.0
+	var cos_half := cos(deg_to_rad(Tuning.ENEMY_FOV_DEGREES / 2.0))
+	var in_cone := dist < Tuning.ENEMY_NEAR_SENSE or forward.normalized().dot(to_player.normalized()) >= cos_half
+	return in_cone and _has_line_of_sight(player)
+
+# Seen: the meter fills over ENEMY_DETECT_SECONDS (twice as fast when only heard); otherwise it drains.
+# A full meter alerts the whole group.
+func _update_suspicion(player, dist: float, delta: float) -> void:
+	var gain := -1.0 / Tuning.ENEMY_DETECT_DECAY_SECONDS
+	var cause := "sight"
+	if player != null and _sees(player, dist):
+		gain = 1.0 / Tuning.ENEMY_DETECT_SECONDS
+		last_seen = player.global_position
+	elif player != null and _hears(player, dist):
+		gain = 2.0 / Tuning.ENEMY_DETECT_SECONDS
+		cause = "noise"
+		last_seen = player.global_position
+	suspicion = clampf(suspicion + gain * delta, 0.0, 1.0)
+	_refresh_cone()
+	if suspicion >= 1.0:
+		alert_pack(cause)
+
+# Suspicious: stop patrolling, keep facing where the player was last seen or heard, and creep toward it.
+# The meter drains while the player stays out of sight, which ends this and resumes the patrol.
+func _investigate(delta: float) -> void:
+	var to_spot := last_seen - global_position
+	to_spot.y = 0.0
+	_turn(to_spot, delta)
+	if to_spot.length() > Tuning.ENEMY_INVESTIGATE_STOP:
+		_walk(to_spot, float(stats["speed"]) * Tuning.ENEMY_INVESTIGATE_SPEED)
+
+# Turn toward `aim` (a flat direction) so the view cone points where the enemy is going or looking.
+func _turn(aim: Vector3, delta: float) -> void:
+	if aim.length() > 0.1:
+		rotation.y = lerp_angle(rotation.y, atan2(-aim.x, -aim.z), 6.0 * delta)
+
+# True if nothing solid is between this enemy's eyes and the player's chest. Walls and cover block it;
+# other enemies in the way do not.
 func _has_line_of_sight(player) -> bool:
 	var from := global_position + Vector3(0, 1.4 * float(stats["size"]), 0)
-	var to: Vector3 = player.global_position + Vector3(0, 1.2, 0)
+	return _first_solid(from, player.global_position + Vector3(0, 1.2, 0)).is_empty()
+
+# The first wall or cover hit by a ray from `from` to `to`, or {} if it is clear. Characters
+# (enemies, the player) do not stop it.
+func _first_solid(from: Vector3, to: Vector3) -> Dictionary:
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	var skip: Array[RID] = [get_rid(), player.get_rid()]
+	var skip: Array[RID] = [get_rid()]
 	for i in 5:
 		var query := PhysicsRayQueryParameters3D.create(from, to)
 		query.exclude = skip
 		var hit: Dictionary = space.intersect_ray(query)
-		if hit.is_empty():
-			return true
-		if not hit["collider"] is CharacterBody3D:
-			return false
+		if hit.is_empty() or not hit["collider"] is CharacterBody3D:
+			return hit
 		skip.append(hit["rid"])
-	return false
+	return {"position": to}  # five characters in a row: treat as blocked
 
 # Heavier enemies take longer strides and sound lower.
 func _footsteps(delta: float, player) -> void:

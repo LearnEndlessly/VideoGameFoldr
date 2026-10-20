@@ -21,11 +21,11 @@ func _init() -> void:
 	for i in 5000:
 		var id: String = Loot.roll(a)[0]
 		counts[id] = counts.get(id, 0) + 1
-	assert(counts["scrap"] > counts["medkit"], "common items must outnumber rare ones")
+	assert(counts["ammo"] > counts["medkit"], "common items must outnumber rare ones")
 	assert(not counts.has("repair_kit"), "repair_kit has weight 0 and must never drop")
 	var inv := Inventory.new()
 	assert(inv.add("medkit", 100) == 100 - 3 * Inventory.SLOTS, "overflow must be returned")
-	assert(inv.add("scrap", 1) == 1, "full backpack must reject new item types")
+	assert(inv.add("ammo", 1) == 1, "full backpack must reject new item types")
 	inv.take_one(0)
 	assert(inv.add("medkit", 1) == 0, "freed space must be reusable")
 	var w: Dictionary = WeaponData.DATA["scattergun"]
