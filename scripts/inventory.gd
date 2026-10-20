@@ -36,12 +36,21 @@ func drop(i: int) -> void:
 	slots[i] = null
 	changed.emit()
 
-func summary() -> String:
-	var totals := {}
+func clear() -> void:
+	slots.fill(null)
+	changed.emit()
+
+# item id -> total quantity across all slots.
+func totals() -> Dictionary:
+	var t := {}
 	for s in slots:
 		if s != null:
-			totals[s["id"]] = totals.get(s["id"], 0) + s["qty"]
+			t[s["id"]] = t.get(s["id"], 0) + s["qty"]
+	return t
+
+func summary() -> String:
+	var t := totals()
 	var parts: PackedStringArray = []
-	for k in totals:
-		parts.append("%s x%d" % [k, totals[k]])
+	for k in t:
+		parts.append("%s x%d" % [k, t[k]])
 	return ", ".join(parts) if parts.size() > 0 else "nothing"
