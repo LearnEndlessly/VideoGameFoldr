@@ -48,7 +48,8 @@ var extract_errors: Array = []  # placement failures (should stay empty): a clea
 var extract_cfg := {"a_min_path": Tuning.EXTRACT_A_MIN_PATH, "b_min_path": Tuning.EXTRACT_B_MIN_PATH,
 	"b_max_path": Tuning.EXTRACT_B_MAX_PATH, "min_separation": Tuning.EXTRACT_MIN_SEPARATION,
 	"min_base_distance": Tuning.EXTRACT_MIN_BASE_DISTANCE, "b_hold": Tuning.EXTRACT_B_HOLD_SECONDS,
-	"b_noise_radius": Tuning.EXTRACT_B_NOISE_RADIUS}
+	"b_noise_radius": Tuning.EXTRACT_B_NOISE_RADIUS, "beam_reveal_radius": Tuning.EXTRACT_BEAM_REVEAL_RADIUS,
+	"beam_always_visible": Tuning.EXTRACT_BEAM_ALWAYS_VISIBLE}
 var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
@@ -319,6 +320,9 @@ func _process(_d: float) -> void:
 	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _enemy_status()]
 	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
+		var shown := beam_shown(z)
+		z["beam"].visible = shown
+		z["label"].visible = shown
 		z["mat"].albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting and raid.extract_zone == z["id"] else z["color"]
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -706,6 +710,14 @@ func _reserve_legacy_extract_pad() -> void:
 	_taken.append([pos, 4.5, 4.5])
 
 # --- extract zones ---
+
+# True if the player can see this zone's beam and label: within the reveal radius, or always when the
+# always-visible setting is on. (The zone's trigger works either way.)
+func beam_shown(z: Dictionary) -> bool:
+	if bool(extract_cfg["beam_always_visible"]):
+		return true
+	var d := Vector2(_player.global_position.x - z["pos"].x, _player.global_position.z - z["pos"].z).length()
+	return d <= float(extract_cfg["beam_reveal_radius"])
 
 # Walking distance (m) from the player's start to every 1 m cell of the map, around walls, rooms, cover,
 # crates and bases (an obstacle is grown by half a body width). 4-connected, so a little longer than a

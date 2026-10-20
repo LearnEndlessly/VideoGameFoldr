@@ -99,6 +99,11 @@ const EXTRACT_MIN_SEPARATION := 35.0  # A and B are at least this far apart
 const EXTRACT_MIN_BASE_DISTANCE := 10.0  # both zones are at least this far from every enemy base
 const EXTRACT_ZONE_SIZE := 6.0  # width and depth of a zone (m)
 const EXTRACT_OPEN_RADIUS := 2  # a zone needs this many metres of walkable space around its centre (no wall, cover or crate), so a player can stand in it
+# Extract beams (and their labels) only show when the player is within EXTRACT_BEAM_REVEAL_RADIUS m of the
+# zone, so they stop working as a compass; set EXTRACT_BEAM_ALWAYS_VISIBLE to true for the old see-it-from-
+# anywhere behaviour. The map pit in the base always shows both zones. Enemy base beams are unaffected.
+const EXTRACT_BEAM_REVEAL_RADIUS := 25.0
+const EXTRACT_BEAM_ALWAYS_VISIBLE := false
 # Placement draws from the extract stream: up to EXTRACT_PLACE_TRIES points per zone, and if no pair
 # works the whole pair is redrawn up to EXTRACT_PAIR_RETRIES times. Then it logs an error and falls back.
 const EXTRACT_PLACE_TRIES := 300
