@@ -25,12 +25,13 @@ Target loop: **Hub** (build, skill tree, stash) -> **Raid** (small bounded proce
 - **Shelters:** open-fronted blue huts. Standing inside makes you invisible to enemies and they lose track of you.
 - **Extraction:** stand inside the green zone for `EXTRACT_HOLD_SECONDS` (8 s). The zone turns yellow, and a countdown and progress bar appear at the top of the screen, while the timer runs. Leaving the zone resets it.
 - **Results and profile:** a successful extract shows what you kept and adds it to a persisted profile (`user://profile.json`, total count per item type). Dying wipes the backpack, shows what was lost, and saves nothing. A start screen and the results screen both show the stored totals. "One more run" starts a fresh map.
+- **Sound:** placeholder effects synthesized in code from `data/sounds.gd` (no audio files): weapon shots, enemy hit/kill/alert, player hurt, pickups, backpack-full, healing, weapon switch, extract countdown ticks, extract and death stingers. Enemy sounds are positional. Master volume is `SFX_VOLUME_DB` in `data/tuning.gd`. No music or ambience.
 - **Raid simulation** (`scripts/raid.gd`): loot requests go through `request_loot()`, which checks the raid state and the distance to the crate (`LOOT_REACH`). Extraction goes through `request_extract()` / `cancel_extract()`, called when the player enters or leaves the zone. `request_fire()` is not built yet; shooting still reaches enemies directly (planned with ammo in Phase 3).
 - **Spawn safety:** enemy groups never spawn within `ENEMY_GROUP_MIN_ORIGIN` (15 m) of the player's start. Fixed in Phase 1; see below.
 - **Version control:** git, branch `main`.
 
 ## Known gaps (not built)
-A stash UI (the profile only stores totals; nothing is brought *into* a raid yet); weapon durability and repair; ammo consumption (ammo exists as an item but nothing uses it); a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); audio; animation; art; settings or menus; export builds.
+A stash UI (the profile only stores totals; nothing is brought *into* a raid yet); weapon durability and repair; ammo consumption (ammo exists as an item but nothing uses it); a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); music and ambience (effects are synthesized beeps, written without being heard, so levels are unverified); animation; art; settings or menus; export builds.
 
 ## Architecture (read this first)
 - Godot 4.7.2 at `D:\Godot_v4.7.2-stable_win64.exe`. Open `project.godot`, press F5.

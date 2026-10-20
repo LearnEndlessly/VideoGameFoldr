@@ -3,6 +3,7 @@ extends CharacterBody3D
 const Inventory = preload("res://scripts/inventory.gd")
 const Loot = preload("res://data/loot.gd")
 const WeaponData = preload("res://data/weapons.gd")
+const Sfx = preload("res://scripts/sfx.gd")
 
 signal died
 signal inventory_toggled(open: bool)
@@ -56,9 +57,11 @@ func use_slot(i: int) -> void:
 	if heal > 0 and health < MAX_HEALTH:
 		health = mini(health + heal, MAX_HEALTH)
 		inventory.take_one(i)
+		Sfx.play("heal")
 
 func take_damage(amount: int) -> void:
 	health -= amount
+	Sfx.play("hurt")
 	if health <= 0:
 		died.emit()
 
@@ -77,8 +80,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			inventory_toggled.emit(inventory_open)
 		elif event.keycode == KEY_1:
 			weapon = WeaponData.DATA["pistol"]
+			Sfx.play("switch")
 		elif event.keycode == KEY_2:
 			weapon = WeaponData.DATA["scattergun"]
+			Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
@@ -121,6 +126,7 @@ func _cast_dir(dir: Vector3, dist: float) -> Dictionary:
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
 func _shoot() -> void:
+	Sfx.play(weapon["sound"])
 	var from := _cam.global_position
 	var cb := _cam.global_transform.basis
 	var spread: float = weapon["spread"]

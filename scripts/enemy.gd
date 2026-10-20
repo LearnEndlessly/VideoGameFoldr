@@ -1,5 +1,7 @@
 extends CharacterBody3D
 
+const Sfx = preload("res://scripts/sfx.gd")
+
 const REACH := 1.8
 const SIGHT := 18.0         # a patrolling enemy notices the player inside this range
 const LOSE := 30.0          # an alert enemy loses the player beyond this range
@@ -90,6 +92,8 @@ func set_alert(on: bool) -> void:
 		return
 	alert = on
 	_lost_timer = 0.0
+	if on:
+		Sfx.play("alert", global_position)
 	_mat.albedo_color = ALERT_COLOR if on else stats["color"]
 	_mat.emission_enabled = on
 	_update_label()
@@ -108,8 +112,10 @@ func take_damage(amount: int) -> bool:
 	health -= amount
 	alert_pack()
 	if health <= 0:
+		Sfx.play("kill", global_position)
 		queue_free()
 		return true
+	Sfx.play("hit", global_position)
 	_refresh_bar()
 	return false
 

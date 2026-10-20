@@ -2,8 +2,8 @@
 # linearly to FALLOFF_MIN of damage at "max", beyond which shots do nothing.
 # damage is per pellet; spread is the random cone half-angle in radians.
 const DATA := {
-	"pistol": {"name": "Pistol", "damage": 25, "pellets": 1, "spread": 0.0, "cooldown": 0.25, "effective": 25.0, "max": 60.0},
-	"scattergun": {"name": "Scattergun", "damage": 12, "pellets": 7, "spread": 0.07, "cooldown": 0.9, "effective": 8.0, "max": 22.0},
+	"pistol": {"name": "Pistol", "damage": 25, "pellets": 1, "spread": 0.0, "cooldown": 0.25, "effective": 25.0, "max": 60.0, "sound": "shoot_pistol"},
+	"scattergun": {"name": "Scattergun", "damage": 12, "pellets": 7, "spread": 0.07, "cooldown": 0.9, "effective": 8.0, "max": 22.0, "sound": "shoot_scatter"},
 }
 const FALLOFF_MIN := 0.3
 

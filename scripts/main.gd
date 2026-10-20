@@ -6,6 +6,7 @@ const Crate = preload("res://scripts/crate.gd")
 const Raid = preload("res://scripts/raid.gd")
 const Profile = preload("res://scripts/profile.gd")
 const ScreenUI = preload("res://scripts/screen_ui.gd")
+const Sfx = preload("res://scripts/sfx.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Tuning = preload("res://data/tuning.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
@@ -27,6 +28,7 @@ var raid: Raid
 var extract_pos := Vector3.ZERO
 
 var _seed := 0
+var _last_tick := -1  # whole second of the extract timer last ticked
 var _taken: Array = []  # [position, radius] of everything placed, to avoid overlaps
 var _player: Player
 var _zone_mat := StandardMaterial3D.new()
@@ -108,7 +110,9 @@ func _build_raid() -> void:
 	raid.setup(_player)
 	_player.raid = raid
 	raid.picked_up.connect(_on_picked_up)
-	raid.inventory_full.connect(func(): _feed_row("", "Backpack full - Tab to make room"))
+	raid.inventory_full.connect(func():
+		Sfx.play("deny")
+		_feed_row("", "Backpack full - Tab to make room"))
 	raid.ended.connect(_on_raid_ended)
 	zone.body_entered.connect(_on_zone_body.bind(true))
 	zone.body_exited.connect(_on_zone_body.bind(false))
@@ -155,6 +159,11 @@ func _process(_d: float) -> void:
 		% [_seed, _player.health, _player.kills, "[SAFE]" if _player.safe else "", _loot_text(), _player.weapon_text(), hold]
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
+	var second := int(raid.extract_elapsed) if raid.extracting else -1
+	if second != _last_tick:
+		_last_tick = second
+		if second >= 0:
+			Sfx.play("extract_tick")
 	if raid.extracting:
 		_extract_label.text = "EXTRACTING  %.1f s" % maxf(hold - raid.extract_elapsed, 0.0)
 		_extract_bar.max_value = hold
@@ -164,6 +173,7 @@ func _loot_text() -> String:
 	return _player.inventory.summary()
 
 func _on_picked_up(id: String, qty: int) -> void:
+	Sfx.play("pickup")
 	_feed_row(id, "+%d %s" % [qty, id.replace("_", " ")])
 
 func _feed_row(id: String, text: String) -> void:
@@ -190,6 +200,7 @@ func _on_raid_ended(result: Dictionary) -> void:
 	get_tree().paused = true  # freeze the world behind the results screen
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var extracted: bool = result["outcome"] == "extracted"
+	Sfx.play("extract_done" if extracted else "death")
 	var layer := CanvasLayer.new()
 	layer.layer = 10
 	add_child(layer)

@@ -5,6 +5,8 @@ const Loot = preload("res://data/loot.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Inventory = preload("res://scripts/inventory.gd")
 const WeaponData = preload("res://data/weapons.gd")
+const Sounds = preload("res://data/sounds.gd")
+const Sfx = preload("res://scripts/sfx.gd")
 
 func _init() -> void:
 	var a := RandomNumberGenerator.new()
@@ -28,5 +30,15 @@ func _init() -> void:
 	assert(WeaponData.damage_at(w, 5.0) == 12, "full damage inside effective range")
 	assert(WeaponData.damage_at(w, 15.0) < 12 and WeaponData.damage_at(w, 15.0) > 0, "falloff between effective and max")
 	assert(WeaponData.damage_at(w, 30.0) == 0, "no damage beyond max range")
+	for name in Sounds.DATA:
+		var s := Sfx.stream_for(name)
+		var want: int = int(float(Sounds.DATA[name]["duration"]) * Sfx.RATE) * 2
+		assert(s.data.size() == want, "%s: wrong length" % name)
+		var peak := 0
+		for i in range(0, s.data.size(), 2):
+			peak = maxi(peak, absi(s.data.decode_s16(i)))
+		assert(peak > 1000, "%s: sound is silent" % name)
+	for weapon_id in WeaponData.DATA:
+		assert(Sounds.DATA.has(WeaponData.DATA[weapon_id]["sound"]), "weapon %s has no sound" % weapon_id)
 	print("checks passed: ", counts)
 	quit()
