@@ -18,7 +18,6 @@ const ItemIcon = preload("res://scripts/item_icon.gd")
 
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
-const GROUP_COUNT := 5  # enemy groups, 3-4 members each
 
 # The first launch shows the start screen; "one more run" skips it. Survives scene reloads.
 static var show_start := true
@@ -47,6 +46,8 @@ var _feed: VBoxContainer  # recent pickups, each with its symbol
 var _extract_box: VBoxContainer
 var _extract_label: Label
 var _extract_bar: ProgressBar
+var _banner: Label
+var _banner_time := 0.0
 
 func _ready() -> void:
 	profile = Profile.new(profile_path)
@@ -88,7 +89,7 @@ func _build_raid() -> void:
 	var zone := _place_extract()
 	for id in LootZones.DATA:
 		_add_structure(id, LootZones.DATA[id])
-	for g in GROUP_COUNT:
+	for g in Tuning.ENEMY_GROUP_COUNT:
 		var center: Vector3 = _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
 		for i in rng.randi_range(3, 4):
 			var e := Enemy.new()
@@ -125,6 +126,7 @@ func _build_raid() -> void:
 	raid.ended.connect(_on_raid_ended)
 	raid.shot_fired.connect(func(weapon_id: String): Sfx.play(WeaponData.DATA[weapon_id]["sound"]))
 	raid.dry_fire.connect(func(): Sfx.play("empty"))
+	raid.threat_started.connect(_on_threat_started)
 	zone.body_entered.connect(_on_zone_body.bind(true))
 	zone.body_exited.connect(_on_zone_body.bind(false))
 
@@ -143,6 +145,15 @@ func _build_raid() -> void:
 	cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	layer.add_child(cross)
 	_build_extract_hud(layer)
+	_banner = Label.new()
+	_banner.add_theme_font_size_override("font_size", 34)
+	_banner.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.visible = false
+	layer.add_child(_banner)
+	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_banner.offset_top = 90
 	add_child(layer)
 
 func _build_extract_hud(layer: CanvasLayer) -> void:
@@ -165,9 +176,11 @@ func _build_extract_hud(layer: CanvasLayer) -> void:
 func _process(_d: float) -> void:
 	if raid == null:
 		return
+	_banner_time = maxf(_banner_time - _d, 0.0)
+	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
-	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   Kills %d   %s\nLoot: %s\n%s\nWASD move, Shift sprint, Space jump, LMB shoot, E open crate, Tab backpack, Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
-		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, _player.kills, "[SAFE]" if _player.safe else "", _loot_text(), _player.weapon_text(), hold]
+	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   Kills %d   %s %s\nLoot: %s\n%s\nWASD move, Shift sprint, Space jump, LMB shoot, E open crate, Tab backpack, Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
+		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, _player.kills, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text(), hold]
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -186,6 +199,12 @@ func _loot_text() -> String:
 func _on_picked_up(id: String, qty: int) -> void:
 	Sfx.play("pickup")
 	_feed_row(id, "+%d %s" % [qty, id.replace("_", " ")])
+
+func _on_threat_started() -> void:
+	_banner.text = "THEY KNOW WHERE YOU ARE\nPatrols are closing in and will keep coming" if raid.threat_continuous \
+		else "THEY KNOW WHERE YOU ARE\nA patrol wave is heading for your position"
+	_banner_time = 7.0
+	Sfx.play("threat")
 
 func _feed_row(id: String, text: String) -> void:
 	var row := HBoxContainer.new()

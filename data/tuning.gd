@@ -4,6 +4,19 @@
 const ENEMY_GROUP_MIN_ORIGIN := 15.0
 # Group members spawn within +/- this many metres of their group centre.
 const GROUP_SPREAD := 2.0
+
+# How many patrol groups spawn (3-4 enemies each). Set to 5 for the old, busier maps.
+const ENEMY_GROUP_COUNT := 3
+
+# Threat clock: THREAT_DELAY_SECONDS into a raid, every group stops patrolling and heads
+# for the player's position, with a HUD warning. They still need to see you to attack, and
+# they cannot see into shelters, so they will wait outside one.
+#   THREAT_CONTINUOUS = true:  they keep tracking the player's live position until the raid ends.
+#   THREAT_CONTINUOUS = false: one wave: they go to where the player was when it started and
+#                              resume patrolling there after THREAT_WAVE_SECONDS.
+const THREAT_DELAY_SECONDS := 180.0
+const THREAT_CONTINUOUS := true
+const THREAT_WAVE_SECONDS := 60.0
 # Placement attempts per object before overlapping other objects is accepted.
 const SPAWN_TRIES := 50
 

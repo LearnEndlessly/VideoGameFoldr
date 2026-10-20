@@ -8,6 +8,7 @@ const SIGHT := 18.0         # a patrolling enemy notices the player inside this 
 const LOSE := 30.0          # an alert enemy loses the player beyond this range
 const GIVE_UP := 4.0        # seconds out of reach before going back to patrol
 const PATROL_RADIUS := 8.0
+const CONVERGE_ARRIVE := 3.0  # metres from the target at which a converging enemy stops
 const PATROL_SPEED := 0.4   # fraction of chase speed
 const ALERT_COLOR := Color(1.0, 0.9, 0.1)
 
@@ -17,6 +18,8 @@ var group_id := 0
 var health := 1
 var max_health := 1
 var alert := false
+var converging := false          # the threat clock sent this enemy toward converge_target
+var converge_target := Vector3.ZERO
 
 var _attack_cd := 0.0
 var _lost_timer := 0.0
@@ -31,6 +34,7 @@ var _bar_width := 1.0
 
 func _ready() -> void:
 	add_to_group("pack_%d" % group_id)
+	add_to_group("enemy")
 	health = stats["health"]
 	max_health = health
 	_target = home
@@ -100,6 +104,17 @@ func set_alert(on: bool) -> void:
 	_mat.emission_enabled = on
 	_update_label()
 
+# Threat clock (see raid.gd): head for `target` instead of patrolling, until end_converge().
+func set_converge(target: Vector3) -> void:
+	converging = true
+	converge_target = target
+
+# Back to patrolling, around wherever the enemy is now.
+func end_converge() -> void:
+	converging = false
+	home = global_position
+	_target = home
+
 # One enemy noticing the player (or being shot) wakes its whole group.
 func alert_pack() -> void:
 	get_tree().call_group("pack_%d" % group_id, "set_alert", true)
@@ -156,6 +171,11 @@ func _physics_process(delta: float) -> void:
 					_attack_cd = 1.0
 					Sfx.play("enemy_strike", global_position)
 					player.take_damage(stats["damage"])
+	elif converging:
+		var to_c := converge_target - global_position
+		to_c.y = 0.0
+		if to_c.length() > CONVERGE_ARRIVE:
+			_walk(to_c, float(stats["speed"]))
 	else:
 		_repick -= delta
 		var to_target := _target - global_position

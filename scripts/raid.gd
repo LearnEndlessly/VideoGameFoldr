@@ -11,6 +11,8 @@ signal picked_up(id: String, qty: int)
 signal inventory_full
 signal shot_fired(weapon_id: String)
 signal dry_fire  # tried to fire with too little ammo
+signal threat_started
+signal threat_ended  # wave mode only
 signal ended(result: Dictionary)  # {"outcome": "extracted"|"dead", "items": {id: qty}, "saved": bool}
 
 enum State { ACTIVE, ENDED }
@@ -21,9 +23,17 @@ var state := State.ACTIVE
 var extracting := false
 var extract_elapsed := 0.0
 var brought := {}  # item id -> quantity of the starting kit not yet spent (never counts as loot)
+# Threat clock settings; tests change these per raid. See data/tuning.gd for what they mean.
+var threat_delay: float = Tuning.THREAT_DELAY_SECONDS
+var threat_continuous: bool = Tuning.THREAT_CONTINUOUS
+var threat_wave_seconds: float = Tuning.THREAT_WAVE_SECONDS
+var threat_active := false
+var elapsed := 0.0  # seconds since the raid began
 
 var _player
 var _fire_cooldown := 0.0
+var _threat_done := false  # a wave has run; it does not start again
+var _wave_left := 0.0
 
 func setup(player) -> void:
 	_player = player
@@ -90,6 +100,16 @@ func _physics_process(delta: float) -> void:
 	if state != State.ACTIVE:
 		return
 	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
+	elapsed += delta
+	if not threat_active and not _threat_done and elapsed >= threat_delay:
+		_start_threat()
+	if threat_active:
+		if threat_continuous:
+			get_tree().call_group("enemy", "set_converge", _player.global_position)
+		else:
+			_wave_left -= delta
+			if _wave_left <= 0.0:
+				_end_threat()
 	if extracting:
 		extract_elapsed += delta
 		if extract_elapsed >= hold_seconds:
@@ -105,6 +125,21 @@ func _loot() -> Dictionary:
 			loot[id] = qty
 	return loot
 
+# Every enemy heads for the player's position. In continuous mode _physics_process keeps
+# updating the target to the live position; in wave mode it is the position right now and
+# the wave ends after threat_wave_seconds.
+func _start_threat() -> void:
+	threat_active = true
+	_wave_left = threat_wave_seconds
+	get_tree().call_group("enemy", "set_converge", _player.global_position)
+	threat_started.emit()
+
+func _end_threat() -> void:
+	threat_active = false
+	_threat_done = true
+	get_tree().call_group("enemy", "end_converge")
+	threat_ended.emit()
+
 func _on_player_died() -> void:
 	_finish("dead")
 
@@ -113,6 +148,7 @@ func _finish(outcome: String) -> void:
 		return
 	state = State.ENDED
 	extracting = false
+	threat_active = false
 	var items := _loot()
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
