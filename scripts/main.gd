@@ -560,6 +560,7 @@ func _return_to_base() -> void:
 # Applies the raid difficulty (data/difficulty.gd) to the map just built. It changes how many enemies there
 # are and how they behave, never the terrain, so a map number is the same map on every difficulty.
 func _apply_difficulty(d: Dictionary) -> void:
+	var scale := Enemies.round_scale(depth)  # each level down makes enemies tougher, up to the cap
 	var diff_rng := RandomNumberGenerator.new()  # its own stream, so the map's rng is untouched
 	diff_rng.seed = _seed + 1
 	var groups := {}
@@ -583,7 +584,9 @@ func _apply_difficulty(d: Dictionary) -> void:
 	for c in get_children():
 		if "stats" in c and not c.is_queued_for_deletion():
 			c.apply_difficulty(float(d["damage"]), float(d["awareness"]))
+			c.apply_depth(scale["health"], scale["speed"], scale["damage"])
 	for sp in _spawners:
+		sp.round_scale = scale
 		sp.interval = maxf(float(d["bases"]["interval"]) * pow(Tuning.DEPTH_INTERVAL_MULT, depth), minf(Tuning.DEPTH_MIN_INTERVAL, float(d["bases"]["interval"])))
 		sp.max_alive = int(d["bases"]["max_alive"]) + depth / Tuning.DEPTH_MAX_ALIVE_EVERY
 		sp.damage_mult = float(d["damage"])

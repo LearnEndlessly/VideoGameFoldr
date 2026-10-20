@@ -191,6 +191,16 @@ func end_converge() -> void:
 	_target = home
 
 # Raid difficulty (data/difficulty.gd): scale the damage this enemy deals and set its alarm time.
+# The round's toughening (Enemies.round_scale). Called before the enemy joins the tree (a spawner's) or after (the
+# map's), so health is re-read from the stats when it already exists.
+func apply_depth(health_mult: float, speed_mult: float, damage_mult: float) -> void:
+	stats["health"] = int(round(stats["health"] * health_mult))
+	stats["speed"] = float(stats["speed"]) * speed_mult
+	stats["damage"] = int(round(stats["damage"] * damage_mult))
+	if max_health > 1:
+		max_health = stats["health"]
+		health = max_health
+
 func apply_difficulty(damage_mult: float, detect: float) -> void:
 	stats["damage"] = int(round(stats["damage"] * damage_mult))
 	detect_seconds = detect

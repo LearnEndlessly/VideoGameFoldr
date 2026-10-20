@@ -1,10 +1,12 @@
 # What the player can grow. Edit numbers here. Two separate systems:
 #
 # 1. RAID UPGRADES (weapon and character) are earned and picked during a raid and lost when it ends, by
-#    extracting or dying. Every RAID_KILLS_PER_PICK kills earns a pick: the game pauses and offers
+#    extracting or dying. XP orbs from kills fill a level: the first needs RAID_XP_BASE xp and each later one
+#    RAID_XP_GROWTH more (a grunt is worth 3, see data/enemies.gd). A level earns a pick: the game pauses and offers
 #    RAID_PICK_CHOICES random upgrades that are not yet at their max. Descending to the next level keeps them.
 #      per_level: the effect of each level (a fraction, except "hp": max health and healing per level)
-const RAID_KILLS_PER_PICK := 2
+const RAID_XP_BASE := 12
+const RAID_XP_GROWTH := 4
 const RAID_PICK_CHOICES := 3
 const RAID_UPGRADES := {
 	"damage": {"group": "weapon", "name": "Heavy rounds", "max": 5, "per_level": 0.15, "desc": "+15% damage with every weapon"},

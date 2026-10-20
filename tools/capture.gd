@@ -153,6 +153,11 @@ func _init() -> void:
 	await _frames(40)
 	player.select_weapon("pistol")
 
+	# XP orbs from a brute's death, a few metres ahead.
+	main.raid._on_kill(player.global_position + Vector3(0, 0, -4), {"health": 150, "speed": 2.0, "damage": 38, "type": "brute", "modifier": ""})
+	await _frames(4)
+	await _shot("16_xp_orbs")
+
 	# Extract countdown, then the threat warning.
 	player.global_position = main.extract_pos + Vector3(0, 0.05, 0)
 	await _frames(100)

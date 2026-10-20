@@ -14,6 +14,8 @@ const Upgrades = preload("res://data/upgrades.gd")
 const Powerups = preload("res://data/powerups.gd")
 const Powerup = preload("res://scripts/powerup.gd")
 const Attachments = preload("res://data/attachments.gd")
+const Enemies = preload("res://data/enemies.gd")
+const XpOrb = preload("res://scripts/xp_orb.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -71,7 +73,7 @@ var _drop_rng := RandomNumberGenerator.new()  # enemy drops; seeded per raid so 
 var _player
 var _base := {}  # the player's numbers before raid upgrades and powerups
 var _dmg_factor := 1.0
-var _kills_toward_pick := 0
+var xp := 0  # experience toward the next level-up
 var _power_rng := RandomNumberGenerator.new()
 var _loot_rng := RandomNumberGenerator.new()  # scrap and attachment drops
 var _fire_cooldown := 0.0
@@ -255,12 +257,13 @@ func _apply_upgrades() -> void:
 	_player.armor = armor
 	_player.speed_mult = (float(_base["speed"]) + float(up["sprint"]["per_level"]) * _lvl("sprint")) * (float(Powerups.DATA["haste"]["mult"]) if powerups.has("haste") else 1.0)
 
-# Every RAID_KILLS_PER_PICK kills earns a level-up; a kill may also drop a powerup.
+# A kill leaves one XP orb per point of the enemy's difficulty, and may drop scrap, an attachment or a powerup.
 func _on_kill(pos: Vector3, stats := {}) -> void:
-	_kills_toward_pick += 1
-	if _kills_toward_pick >= Upgrades.RAID_KILLS_PER_PICK:
-		_kills_toward_pick = 0
-		picks_pending += 1
+	if not stats.is_empty():
+		for i in Enemies.xp_value(stats):
+			var orb := XpOrb.new()
+			orb.position = pos + Vector3(_loot_rng.randf_range(-1.2, 1.2), 0, _loot_rng.randf_range(-1.2, 1.2))
+			get_parent().add_child.call_deferred(orb)
 	if not stats.is_empty() and _loot_rng.randf() < float(stats.get("scrap_chance", 0.0)):  # scrap repairs attachments
 		var amount: Array = stats["scrap"]
 		_spawn_pickup("scrap", _loot_rng.randi_range(amount[0], amount[1]), pos + Vector3(0.7, 0, 0))
@@ -278,6 +281,25 @@ func _spawn_pickup(id: String, qty: int, pos: Vector3) -> void:
 	pickup.qty = qty
 	pickup.position = pos
 	get_parent().add_child.call_deferred(pickup)
+
+# XP the next level needs: more for each level already won.
+func xp_needed() -> int:
+	return Upgrades.RAID_XP_BASE + Upgrades.RAID_XP_GROWTH * (raid_level() - 1)
+
+# Adds experience; each full level earns a pick.
+func add_xp(amount: int) -> void:
+	xp += amount
+	while xp >= xp_needed():
+		xp -= xp_needed()
+		picks_pending += 1
+
+# The player walked into an XP orb.
+func collect_xp(orb) -> bool:
+	if state != State.ACTIVE or not is_instance_valid(orb) or orb.is_queued_for_deletion():
+		return false
+	add_xp(orb.amount)
+	orb.queue_free()
+	return true
 
 # Up to RAID_PICK_CHOICES random upgrades that are not at their max level yet.
 func pick_choices() -> Array:
@@ -314,7 +336,7 @@ func raid_level() -> int:
 	return 1 + taken + picks_pending
 
 func xp_fraction() -> float:
-	return float(_kills_toward_pick) / float(Upgrades.RAID_KILLS_PER_PICK)
+	return float(xp) / float(xp_needed())
 
 # "OVERDRIVE 8s  HASTE 3s" for the HUD, "" with none active.
 func powerup_text() -> String:

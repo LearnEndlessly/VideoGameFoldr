@@ -15,6 +15,7 @@ var interval: float = Tuning.SPAWNER_INTERVAL  # seconds between spawns, max_ali
 var max_alive: int = Tuning.SPAWNER_MAX_ALIVE
 var damage_mult := 1.0  # what its defenders get (see Enemy.apply_difficulty)
 var detect_seconds: float = Tuning.ENEMY_DETECT_SECONDS
+var round_scale := {}  # Enemies.round_scale for this level; its defenders get it
 var rng_seed := 0  # set by main before add_child
 var health: int = Tuning.SPAWNER_HEALTH
 
@@ -115,6 +116,8 @@ func _physics_process(delta: float) -> void:
 	var a := _rng.randf() * TAU
 	e.position = global_position + Vector3(cos(a), 0, sin(a)) * 3.5
 	e.apply_difficulty(damage_mult, detect_seconds)
+	if not round_scale.is_empty():
+		e.apply_depth(round_scale["health"], round_scale["speed"], round_scale["damage"])
 	get_parent().add_child(e)
 	if pack.any(func(m): return m.alert):  # the group is already fighting: the newcomer joins in
 		e.set_alert(true)

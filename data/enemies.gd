@@ -1,4 +1,5 @@
 const Rng = preload("res://data/rng.gd")
+const Tuning = preload("res://data/tuning.gd")
 
 # Ammo drops: when the player kills one, it leaves a pickup of "drop" [min, max] ammo with "drop_chance", and
 # scrap ("scrap" [min, max] with "scrap_chance"), which repairs weapon attachments at the base.
@@ -28,3 +29,20 @@ static func roll(rng: RandomNumberGenerator) -> Dictionary:
 		e["health"] = int(e["health"] * MODIFIERS[m].get("health_mult", 1.0))
 		e["speed"] = e["speed"] * MODIFIERS[m].get("speed_mult", 1.0)
 	return e
+
+# How much tougher enemies are in `round` (0 = the first level): {"damage", "health", "speed"} multipliers on the
+# base stats, each capped at Tuning.ENEMY_SCALE_CAP.
+static func round_scale(round: int) -> Dictionary:
+	var cap: float = Tuning.ENEMY_SCALE_CAP
+	return {
+		"damage": minf(1.0 + Tuning.ENEMY_ROUND_DAMAGE * round, cap),
+		"health": minf(1.0 + Tuning.ENEMY_ROUND_HEALTH * round, cap),
+		"speed": minf(1.0 + Tuning.ENEMY_ROUND_SPEED * (round / Tuning.ENEMY_ROUND_SPEED_EVERY), cap),
+	}
+
+# What an enemy is worth in XP: its health, speed and damage each against a plain grunt (50 health, 3 m/s, 15
+# damage), added up and rounded, at least 1. A plain grunt is worth 3; armored, fast, brute and deeper-level
+# enemies are worth more.
+static func xp_value(stats: Dictionary) -> int:
+	var score: float = float(stats["health"]) / 50.0 + float(stats["speed"]) / 3.0 + float(stats["damage"]) / 15.0
+	return maxi(1, int(round(score)))

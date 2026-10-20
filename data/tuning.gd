@@ -140,6 +140,18 @@ const DEPTH_REWARD_BONUS := 0.25
 # Powerups (data/powerups.gd): an enemy kill drops one with this chance; it vanishes after POWERUP_PICKUP_SECONDS.
 const POWERUP_DROP_CHANCE := 0.175  # was 0.25; 30% fewer
 const POWERUP_PICKUP_SECONDS := 5.0
+# Enemies get tougher each round (each level descended, 0 on the first). Damage and health rise by
+# ENEMY_ROUND_DAMAGE / ENEMY_ROUND_HEALTH (a fraction of the base) every round, speed by ENEMY_ROUND_SPEED every
+# ENEMY_ROUND_SPEED_EVERY rounds, and none of the three goes past ENEMY_SCALE_CAP times the base, in total.
+const ENEMY_ROUND_DAMAGE := 0.1
+const ENEMY_ROUND_HEALTH := 0.1
+const ENEMY_ROUND_SPEED := 0.15
+const ENEMY_ROUND_SPEED_EVERY := 3
+const ENEMY_SCALE_CAP := 1.5
+# Experience: a kill leaves one XP orb per point of the enemy's difficulty (data/enemies.gd xp_value). Orbs drift
+# toward the player within XP_MAGNET_RADIUS m at XP_MAGNET_SPEED m/s.
+const XP_MAGNET_RADIUS := 4.0
+const XP_MAGNET_SPEED := 9.0
 # Weapon attachments (data/attachments.gd) are super rare: this chance per kill.
 const ATTACHMENT_DROP_CHANCE := 0.02
 # True: a real launch of the game starts with an empty profile (no stash, points, attributes or difficulty)

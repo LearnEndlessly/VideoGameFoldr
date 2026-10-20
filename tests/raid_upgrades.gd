@@ -63,15 +63,16 @@ func _run() -> void:
 	_check(Main.resets_profile(Tuning.PROFILE_PATH, false) and not Main.resets_profile(Tuning.PROFILE_PATH, true) and not Main.resets_profile(PATH, false),
 		"only the first launch's real save file should be reset")
 
-	# Level-ups: every RAID_KILLS_PER_PICK kills earns one pick, of up to 3 distinct upgrades.
+	# Level-ups: filling the XP bar earns one pick, of up to 3 distinct upgrades.
 	var main = await _raid()
 	var raid = main.raid
 	var player = main._player
 	_check(raid.upgrades.is_empty() and raid.picks_pending == 0, "a fresh raid has no upgrades")
 	_check(not raid.choose_upgrade("damage"), "no pick is pending, so nothing is bought")
-	for i in Upgrades.RAID_KILLS_PER_PICK:
-		raid._on_kill(Vector3(50, 0, 50))
-	_check(raid.picks_pending == 1, "%d kills should earn a pick, got %d" % [Upgrades.RAID_KILLS_PER_PICK, raid.picks_pending])
+	raid.add_xp(Upgrades.RAID_XP_BASE - 1)
+	_check(raid.picks_pending == 0, "one xp short of a level earns nothing")
+	raid.add_xp(1)
+	_check(raid.picks_pending == 1, "%d xp should earn a pick, got %d" % [Upgrades.RAID_XP_BASE, raid.picks_pending])
 	var choices: Array = raid.pick_choices()
 	_check(choices.size() == Upgrades.RAID_PICK_CHOICES and choices.duplicate().size() == choices.size(), "three choices expected, got %s" % [choices])
 	_check(raid.choose_upgrade("damage") and raid.picks_pending == 0 and raid.upgrades == {"damage": 1}, "taking a pick should spend it")
@@ -159,8 +160,8 @@ func _run() -> void:
 	main = await _raid()
 	raid = main.raid
 	_check(raid.raid_level() == 1 and is_equal_approx(raid.xp_fraction(), 0.0), "a fresh raid is level 1 with an empty bar")
-	raid._on_kill(Vector3(50, 0, 50))
-	_check(is_equal_approx(raid.xp_fraction(), 1.0 / Upgrades.RAID_KILLS_PER_PICK), "one kill fills part of the bar")
+	raid.add_xp(3)
+	_check(is_equal_approx(raid.xp_fraction(), 3.0 / Upgrades.RAID_XP_BASE), "xp fills part of the bar")
 	_check(main._xp_bar != null and main._xp_bar.get_parent() == main._hp_bar.get_parent(), "the XP bar sits with the health bar")
 	main._player.pause_requested.emit()
 	_check(paused and main._pause_layer != null, "Esc should pause the game behind the controls screen")
