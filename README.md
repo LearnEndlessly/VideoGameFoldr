@@ -23,12 +23,14 @@ Target loop: **Hub** (build, skill tree, stash) -> **Raid** (small bounded proce
 - **Inventory:** 12 slots, stackable, drawn symbols per item (gear, bullet, cross, diamond), click to use, right-click to drop. Crates keep what does not fit.
 - **Enemies:** 5 groups of 3-4. Types: grunt and brute. 25% chance of a modifier (armored = 2x health, fast = 1.5x speed). Groups patrol an area, turn yellow when they notice you or are shot (the whole group alerts), and give up after 4 s out of reach. A health bar sits above each one (blue frame = armored).
 - **Shelters:** open-fronted blue huts. Standing inside makes you invisible to enemies and they lose track of you.
-- **Run end:** reaching the green zone, or dying, reloads a new random map and shows the last result. (Phase 2 replaces this with a hold-to-extract timer, results screens, and a saved profile.)
+- **Extraction:** stand inside the green zone for `EXTRACT_HOLD_SECONDS` (8 s). The zone turns yellow, and a countdown and progress bar appear at the top of the screen, while the timer runs. Leaving the zone resets it.
+- **Results and profile:** a successful extract shows what you kept and adds it to a persisted profile (`user://profile.json`, total count per item type). Dying wipes the backpack, shows what was lost, and saves nothing. A start screen and the results screen both show the stored totals. "One more run" starts a fresh map.
+- **Raid simulation** (`scripts/raid.gd`): loot requests go through `request_loot()`, which checks the raid state and the distance to the crate (`LOOT_REACH`). Extraction goes through `request_extract()` / `cancel_extract()`, called when the player enters or leaves the zone. `request_fire()` is not built yet; shooting still reaches enemies directly (planned with ammo in Phase 3).
 - **Spawn safety:** enemy groups never spawn within `ENEMY_GROUP_MIN_ORIGIN` (15 m) of the player's start. Fixed in Phase 1; see below.
 - **Version control:** git, branch `main`.
 
 ## Known gaps (not built)
-Stash, save/load, and extraction keeping loot; weapon durability and repair; ammo consumption (ammo exists as an item but nothing uses it); a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); audio; animation; art; settings or menus; export builds.
+A stash UI (the profile only stores totals; nothing is brought *into* a raid yet); weapon durability and repair; ammo consumption (ammo exists as an item but nothing uses it); a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); audio; animation; art; settings or menus; export builds.
 
 ## Architecture (read this first)
 - Godot 4.7.2 at `D:\Godot_v4.7.2-stable_win64.exe`. Open `project.godot`, press F5.
@@ -45,7 +47,16 @@ Run each with `Godot --headless --path <project> -s tests/<name>.gd`. Always run
 check.gd         # RNG determinism, loot weights, inventory, damage falloff
 smoke.gd         # opens crates, uses items, shoots, alerts a pack
 spawn_safety.gd  # 60 maps: no enemy group near the player's start; 20 maps: no damage in the first 2 s. Exit code 1 on failure.
+profile_unit.gd  # profile save/load round trip, overwrite, corrupt-file recovery. Exit code 1 on failure.
+profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps nothing, leaving the zone resets the timer,
+                 # far loot requests are refused, and a second process reads the file back. Exit code 1 on failure.
 ```
+The profile tests print a JSON parse error once; that is the deliberate corrupt-file case.
+
+## Phase 2 notes
+- **Tuning values to look at first** (`data/tuning.gd`): `EXTRACT_HOLD_SECONDS` (8) is the main lever on how risky extracting feels; `LOOT_REACH` (4 m).
+- **Assumptions:** (1) standing in the zone is enough to extract, so `request_extract()` is called by the zone's enter event, not by a key press; (2) the whole backpack counts as "this raid's loot" because nothing is carried in yet; Phase 3's starting ammo will need a decision here; (3) enemies and the world freeze behind the results screen; (4) being shot or attacked does not interrupt the hold timer; (5) the start screen appears once per launch, then "One more run" goes straight into a raid.
+- The profile file lives in Godot's user folder (on Windows, `%APPDATA%\Godot\app_userdata\VideoGame Beta\profile.json`); delete it to reset your totals.
 
 ## Phase 1 report: the "lost 30 HP in 2 seconds" bug
 - **Root cause:** `_free_spot()` in `scripts/main.gd` places objects by trying random spots. By the time enemy groups are placed, 38+ cover blocks, crates, and shelters already fill the map, so all 50 tries fail. The old fallback then kept the *last random sample* even when it landed inside the 15 m no-spawn zone around the player's start. Groups ended up 3-10 m from the player and attacked within seconds.
