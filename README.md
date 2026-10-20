@@ -43,6 +43,7 @@ profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps noth
 extract.gd       # two extract zones: placement constraints on 40 seeds, determinism, zone B's noise, hold reset, beam reveal radius, threat clock HUD.
 layout_isolation.gd  # everything except the extract zones is identical to the pre-extract build (tests/fixtures/layout_golden.json), and extract tuning moves only the zones.
 enemy_base.gd    # enemy view cones and suspicion, enemy bases and their respawn beams, ammo drops.
+attachments.gd  # bullet flights and ricochets, attachments (drops, fitting, effects, wear, breaking, repair with scrap only).
 weapons.gd  # only the chosen weapon in a raid, the sniper, zoom and the scope overlay, the Ammo Depot name.
 raid_upgrades.gd  # raid upgrades and level-up pauses, powerups (effect, expiry, drops), hold-R reload, the 14-round pistol clip, the launch-reset rule.
 progression.gd  # the scoreboard stats (profile, wall board), the end screen choice, and descending: carried loot, extra bases, faster spawns, ammo, reward, map unchanged.
@@ -59,6 +60,8 @@ The profile tests print a JSON parse error once; that is the deliberate corrupt-
 - **Powerups** (`data/powerups.gd`): an enemy kill drops one 17.5% of the time (`POWERUP_DROP_CHANCE`, cut 30% from 25%). It lies on the ground for 5 s (`POWERUP_PICKUP_SECONDS`), blinking at the end; touch it for 10 s of Overdrive (+50% damage), Haste (+40% speed) or Shield (half damage taken).
 - **HUD and pause:** the health bar and a blue XP bar under it (kills toward the next level-up, with the raid level as `LV`) are at the bottom left, above the controls hint. Esc pauses the game and shows the controls as key caps; Esc or Resume continues. The depth shown as `DEPTH n` was `LEVEL n`.
 - **Weapons and zoom.** Only the weapon chosen at the ammo depot goes into a raid (the number keys no longer bring in the others). Hold the right mouse button to zoom with any weapon (`zoom_fov` in `data/weapons.gd`, lookspeed scales with it); the sniper rifle (100 damage, 5-round clip, 1.4 s between shots, `scope` true) looks through a black scope with a crosshair and range ticks.
+- **Bullets you can see** (`scripts/tracer.gd`, the `tracer` rows in `data/weapons.gd`): every pellet is a glowing bullet that flies from the muzzle to where it landed and drags a fading trail. The pistol is yellow with a short trail, the scattergun throws eight short orange pellets, the sniper is a fast pale-blue bullet with a long trail that lingers about a second. Hits throw sparks (red off an enemy), and a shot into a wall also ricochets: a bright streak bounces off the surface. The hit itself is still instant; the bullet is a visual that follows it.
+- **Attachments and scrap** (`data/attachments.gd`): enemies drop scrap (35% of grunts, 70% of brutes) and, super rarely (2% per kill, `ATTACHMENT_DROP_CHANCE`), a weapon attachment: Heavy Barrel (+20% damage), Compensator (half spread, 10% faster firing) or Speed Loader (25% faster reloads). Extract with one and it is yours: it stays in the stash, is fitted to one weapon at the ammo depot, and is not lost if you die. Every shot fired with the weapon wears it down (120 shots); at 0 it breaks and does nothing until you repair it at the ammo depot for 5 scrap, which only scrap can do.
 - **Reloading:** one press of R loads a full magazine, shown as the gun dipping, the old magazine dropping out and a new one sliding in with a click (switching weapon cancels it). The pistol's magazine is 14 rounds (45% of the old 30).
 - **No saves yet:** a real launch starts with an empty profile (no stash, points, attributes or difficulty choices); the base and raids within one session keep what was earned (`RESET_ON_LAUNCH` in `data/tuning.gd`). Test and tool profiles are never reset.
 - **Scoreboard.** The base's north wall carries the RAID LEDGER: runs, extracted, killed in action, survival rate, kills, shots fired, accuracy (shots that hurt something) and deepest level, kept in the profile for every raid (`Profile.record_raid`).
@@ -82,6 +85,13 @@ All in `data/tuning.gd`:
 
 ## Tuning values to look at first (going deeper)
 All in `data/tuning.gd`: `DEPTH_EXTRA_SPAWNERS` (1) and `DEPTH_MAX_EXTRA_SPAWNERS` (4), `DEPTH_INTERVAL_MULT` (0.85 per level) and `DEPTH_MIN_INTERVAL` (4 s), `DEPTH_MAX_ALIVE_EVERY` (2), `DEPTH_AMMO_BONUS` (6), `DEPTH_DROP_BONUS` (0.25), `DEPTH_REWARD_BONUS` (0.25).
+
+## Assumptions made for the bullets and attachments
+- Bullets are small glowing spheres and stretched boxes (no sprite art), travelling at 60 to 220 m/s so the nearest targets are hit within a frame or two; the damage does not wait for the bullet. Nothing about the hit changes.
+- "Persistent unless broken": attachments live in the stash like other loot, are not carried into a raid, are not lost on death, and wear only through use. An attachment picked up in a raid is loot and is lost with the raid if you die; once banked it is safe. One copy fits one weapon at a time and one attachment fits per weapon.
+- Scrap is a new enemy drop only (crates never hold it); the old scrap item had been removed. It is not multiplied differently from other loot, but attachments are never multiplied by the reward.
+- Wear is per attachment type, not per copy; repairing restores it fully.
+- Not built: more attachment types (scopes, extended magazines), attachment rarity tiers, a way to scrap an attachment.
 
 ## Assumptions made for the menu changes
 - "Controller description" is the keyboard and mouse controls list; there is no gamepad support, and the screen says so.

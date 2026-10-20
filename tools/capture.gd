@@ -140,6 +140,19 @@ func _init() -> void:
 	await _shot("14_reload_insert")
 	await _frames(40)
 
+	# Bullets in flight: each weapon draws a different bullet and trail.
+	player.inventory.add("ammo", 20)
+	for id in ["pistol", "sniper", "scattergun"]:
+		player.select_weapon(id)
+		main.raid.loaded[id] = 5
+		main.raid.reload_weapon = ""
+		await _frames(100)
+		main.raid.request_fire(id, player._cam.global_transform)
+		await _frames(3)
+		await _shot("15_bullets_%s" % id)
+	await _frames(40)
+	player.select_weapon("pistol")
+
 	# Extract countdown, then the threat warning.
 	player.global_position = main.extract_pos + Vector3(0, 0.05, 0)
 	await _frames(100)

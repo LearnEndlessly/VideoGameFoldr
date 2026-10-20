@@ -13,6 +13,7 @@ const Difficulty = preload("res://data/difficulty.gd")
 const Upgrades = preload("res://data/upgrades.gd")
 const Powerups = preload("res://data/powerups.gd")
 const Powerup = preload("res://scripts/powerup.gd")
+const Attachments = preload("res://data/attachments.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -21,6 +22,8 @@ signal dry_fire  # tried to fire with too little ammo in the magazine
 signal reload_started(weapon_id: String)
 signal reload_done(weapon_id: String)
 signal threat_started
+signal bullet_traced(weapon_id: String, end: Vector3, normal: Vector3, kind: String)  # one per pellet, for the bullet visuals
+signal attachment_broke(attachment_name: String)
 signal threat_ended  # wave mode only
 signal ended(result: Dictionary)  # {"outcome": "extracted"|"dead", "items": {id: qty}, "saved": bool}
 
@@ -60,6 +63,7 @@ var reload_left := 0.0
 var upgrades := {}  # raid upgrade id -> level (data/upgrades.gd); set by main before setup, lost when the raid ends
 var picks_pending := 0  # level-ups earned and not yet taken
 var powerups := {}  # active powerup id -> seconds left
+var att_left := {}  # attachment id -> shots left, from the profile; written back when the raid ends
 var cooldown_mult := 1.0  # the Rapid fire upgrade shortens the wait between shots
 
 var _threat_reached := false
@@ -69,6 +73,7 @@ var _base := {}  # the player's numbers before raid upgrades and powerups
 var _dmg_factor := 1.0
 var _kills_toward_pick := 0
 var _power_rng := RandomNumberGenerator.new()
+var _loot_rng := RandomNumberGenerator.new()  # scrap and attachment drops
 var _fire_cooldown := 0.0
 var _sample_clock := Telemetry.SAMPLE_SECONDS  # starts full so the first sample is logged at once
 var _threat_done := false  # a wave has run; it does not start again
@@ -78,6 +83,10 @@ func setup(player) -> void:
 	_player = player
 	_drop_rng.seed = seed_value
 	_power_rng.seed = seed_value + 3
+	_loot_rng.seed = seed_value + 5
+	if profile != null:
+		for w in profile.attached:
+			att_left[profile.attached[w]] = profile.shots_left(profile.attached[w])
 	_base = {"hp": player.max_health, "armor": player.armor, "speed": player.speed_mult, "reload": reload_seconds}
 	player.died.connect(_on_player_died)
 	for id in carry:
@@ -137,6 +146,42 @@ func request_reload() -> bool:
 func cancel_reload() -> void:
 	reload_weapon = ""
 
+# The attachment fitted to a weapon that still works (not broken): its id, or "".
+func _attachment_id(weapon_id: String) -> String:
+	if profile == null:
+		return ""
+	var id: String = profile.attached.get(weapon_id, "")
+	return id if id != "" and int(att_left.get(id, 0)) > 0 else ""
+
+func _att(weapon_id: String) -> Dictionary:
+	var id := _attachment_id(weapon_id)
+	return Attachments.DATA[id] if id != "" else {}
+
+# The player changed weapon: its attachment changes the reload time.
+func weapon_changed() -> void:
+	if _player != null:
+		_apply_upgrades()
+
+# One shot of wear for the attachment on `weapon_id`; at 0 it breaks and stops helping.
+func _wear_attachment(weapon_id: String) -> void:
+	var id := _attachment_id(weapon_id)
+	if id == "":
+		return
+	att_left[id] = int(att_left[id]) - 1
+	if att_left[id] <= 0:
+		attachment_broke.emit(Attachments.DATA[id]["name"])
+		_apply_upgrades()
+
+# "HEAVY BARREL 87" for the HUD (the current weapon's attachment), "" with none or "HEAVY BARREL BROKEN".
+func attachment_text() -> String:
+	if profile == null:
+		return ""
+	var id: String = profile.attached.get(_player.weapon_id, "")
+	if id == "":
+		return ""
+	var left := int(att_left.get(id, 0))
+	return "%s %s" % [Attachments.DATA[id]["name"].to_upper(), str(left) if left > 0 else "BROKEN"]
+
 # The player pulled the trigger. Checks the raid state, the weapon's cooldown and the
 # backpack's ammo; if all allow it, spends the ammo and resolves every pellet against
 # the world. `aim` is the camera's transform. Returns true if a shot was fired.
@@ -144,7 +189,8 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 	if state != State.ACTIVE or _fire_cooldown > 0.0 or reload_weapon != "" or not WeaponData.DATA.has(weapon_id):
 		return false
 	var w: Dictionary = WeaponData.DATA[weapon_id]
-	_fire_cooldown = w["cooldown"] * cooldown_mult  # also paces the dry-fire click
+	var att := _att(weapon_id)
+	_fire_cooldown = w["cooldown"] * cooldown_mult * float(att.get("cooldown", 1.0))  # also paces the dry-fire click
 	var item: String = w["ammo_item"]
 	var cost: int = w["ammo_per_shot"]
 	if loaded_rounds(weapon_id) < cost or not _player.inventory.remove(item, cost):
@@ -160,7 +206,7 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 	var hits := 0
 	var total_dmg := 0
 	var space: PhysicsDirectSpaceState3D = _player.get_world_3d().direct_space_state
-	var spread: float = w["spread"]
+	var spread: float = float(w["spread"]) * float(att.get("spread", 1.0))
 	for i in int(w["pellets"]):
 		var dir := -aim.basis.z
 		if spread > 0.0:
@@ -168,8 +214,10 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		var query := PhysicsRayQueryParameters3D.create(aim.origin, aim.origin + dir * float(w["max"]))
 		query.exclude = [_player.get_rid()]
 		var hit: Dictionary = space.intersect_ray(query)
+		var end: Vector3 = hit["position"] if hit else aim.origin + dir * minf(float(w["max"]), 90.0)
+		bullet_traced.emit(weapon_id, end, hit.get("normal", Vector3.ZERO), "enemy" if hit and hit["collider"].has_method("take_damage") else ("wall" if hit else "none"))
 		if hit and hit["collider"].has_method("take_damage"):
-			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor))
+			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor * float(att.get("damage", 1.0))))
 			hits += 1
 			total_dmg += dmg
 			var enemy = hit["collider"]
@@ -181,7 +229,8 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 				_player.kills += 1
 				Telemetry.emit("player.kill.enemy", kill_info)
 				_drop_ammo(enemy.global_position, enemy.stats)
-				_on_kill(enemy.global_position)
+				_on_kill(enemy.global_position, enemy.stats)
+	_wear_attachment(weapon_id)
 	if hits > 0:
 		shots_hit += 1
 	Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "fired", "hits": hits, "dmg": total_dmg, "ammo_left": _player.inventory.count(item)})
@@ -197,7 +246,7 @@ func _apply_upgrades() -> void:
 	var up: Dictionary = Upgrades.RAID_UPGRADES
 	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * _lvl("damage")) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
 	cooldown_mult = 1.0 - float(up["firerate"]["per_level"]) * _lvl("firerate")
-	reload_seconds = float(_base["reload"]) * (1.0 - float(up["hands"]["per_level"]) * _lvl("hands"))
+	reload_seconds = float(_base["reload"]) * (1.0 - float(up["hands"]["per_level"]) * _lvl("hands")) * float(_att(_player.weapon_id).get("reload", 1.0))
 	_player.max_health = int(_base["hp"]) + int(up["vitality"]["hp"]) * _lvl("vitality")
 	_player.health = mini(_player.health, _player.max_health)
 	var armor := minf(float(_base["armor"]) + float(up["plating"]["per_level"]) * _lvl("plating"), 0.8)
@@ -207,16 +256,28 @@ func _apply_upgrades() -> void:
 	_player.speed_mult = (float(_base["speed"]) + float(up["sprint"]["per_level"]) * _lvl("sprint")) * (float(Powerups.DATA["haste"]["mult"]) if powerups.has("haste") else 1.0)
 
 # Every RAID_KILLS_PER_PICK kills earns a level-up; a kill may also drop a powerup.
-func _on_kill(pos: Vector3) -> void:
+func _on_kill(pos: Vector3, stats := {}) -> void:
 	_kills_toward_pick += 1
 	if _kills_toward_pick >= Upgrades.RAID_KILLS_PER_PICK:
 		_kills_toward_pick = 0
 		picks_pending += 1
+	if not stats.is_empty() and _loot_rng.randf() < float(stats.get("scrap_chance", 0.0)):  # scrap repairs attachments
+		var amount: Array = stats["scrap"]
+		_spawn_pickup("scrap", _loot_rng.randi_range(amount[0], amount[1]), pos + Vector3(0.7, 0, 0))
+	if _loot_rng.randf() < Tuning.ATTACHMENT_DROP_CHANCE:  # super rare
+		_spawn_pickup(Attachments.DATA.keys()[_loot_rng.randi_range(0, Attachments.DATA.size() - 1)], 1, pos + Vector3(-0.7, 0, 0))
 	if _power_rng.randf() < Tuning.POWERUP_DROP_CHANCE:
 		var p := Powerup.new()
 		p.id = Powerups.DATA.keys()[_power_rng.randi_range(0, Powerups.DATA.size() - 1)]
 		p.position = pos
 		get_parent().add_child.call_deferred(p)
+
+func _spawn_pickup(id: String, qty: int, pos: Vector3) -> void:
+	var pickup := Pickup.new()
+	pickup.id = id
+	pickup.qty = qty
+	pickup.position = pos
+	get_parent().add_child.call_deferred(pickup)
 
 # Up to RAID_PICK_CHOICES random upgrades that are not at their max level yet.
 func pick_choices() -> Array:
@@ -443,11 +504,14 @@ func _finish(outcome: String) -> void:
 	var items := _loot()
 	if outcome == "extracted":  # the raid difficulty scales what is kept (what is lost stays as it was)
 		for id in items:
-			items[id] = Difficulty.scale(int(items[id]), reward_mult)
+			if not id.begins_with("att_"):  # a super rare attachment is not multiplied
+				items[id] = Difficulty.scale(int(items[id]), reward_mult)
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
 	var points := 0  # attribute points earned (successful extracts only)
 	if profile != null:
+		for id in att_left:  # wear counts whether the raid was won or lost
+			profile.set_wear(id, att_left[id])
 		if outcome == "extracted":
 			profile.add_items(items)
 			points = profile.record_extract(_player.kills, reward_mult)

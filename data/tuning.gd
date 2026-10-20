@@ -140,6 +140,8 @@ const DEPTH_REWARD_BONUS := 0.25
 # Powerups (data/powerups.gd): an enemy kill drops one with this chance; it vanishes after POWERUP_PICKUP_SECONDS.
 const POWERUP_DROP_CHANCE := 0.175  # was 0.25; 30% fewer
 const POWERUP_PICKUP_SECONDS := 5.0
+# Weapon attachments (data/attachments.gd) are super rare: this chance per kill.
+const ATTACHMENT_DROP_CHANCE := 0.02
 # True: a real launch of the game starts with an empty profile (no stash, points, attributes or difficulty)
 # until saving is built; a raid or the base reloading within the session keeps what was earned.
 const RESET_ON_LAUNCH := true

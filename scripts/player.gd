@@ -195,6 +195,10 @@ func _process(delta: float) -> void:
 	_update_reload_anim()
 	_update_aim()
 
+# Where bullets leave the gun, in the world (from the middle of the view while scoped in).
+func muzzle_position() -> Vector3:
+	return _cam.global_transform * (Vector3(0, -0.04, -0.5) if scoped else Vector3(0.22, -0.18, -0.5))
+
 # How far the current reload has got, 0..1, or -1 when none is running.
 func reload_progress() -> float:
 	if raid == null or raid.reload_weapon != weapon_id or raid.reload_seconds <= 0.0:
@@ -270,6 +274,7 @@ func select_weapon(id: String) -> void:
 	weapon = WeaponData.DATA[id]
 	if raid != null:
 		raid.cancel_reload()  # switching weapons interrupts a reload
+		raid.weapon_changed()
 	_show_viewmodel()
 
 # The weapon's optional art model (its "model" field in data/weapons.gd), held at the lower

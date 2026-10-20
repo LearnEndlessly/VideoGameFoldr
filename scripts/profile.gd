@@ -7,9 +7,12 @@ const Loot = preload("res://data/loot.gd")
 const Upgrades = preload("res://data/upgrades.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Difficulty = preload("res://data/difficulty.gd")
+const Attachments = preload("res://data/attachments.gd")
 
 var path: String
 var totals := {}  # item id -> quantity in the stash
+var attached := {}  # weapon id -> attachment id fitted to it (one per weapon); the attachments themselves are in `totals`
+var wear := {}  # attachment id -> shots left (missing = full)
 var equipped := "pistol"  # the weapon held at the start of a raid
 var attrs := {}  # attribute id -> level (missing = 0)
 var points := 0  # unspent attribute points
@@ -25,6 +28,8 @@ func _init(file_path: String = Tuning.PROFILE_PATH) -> void:
 func load_from_disk() -> void:
 	totals = {}
 	equipped = "pistol"
+	attached = {}
+	wear = {}
 	attrs = {}
 	points = 0
 	difficulty = {}
@@ -44,6 +49,17 @@ func load_from_disk() -> void:
 	# Everything below arrived in version 2; an older file simply lacks it (weapon upgrade levels in old files are ignored).
 	if WeaponData.DATA.has(str(data.get("equipped", ""))):
 		equipped = str(data["equipped"])
+	var at = data.get("attached")
+	if typeof(at) == TYPE_DICTIONARY:
+		for w in at:
+			if WeaponData.DATA.has(str(w)) and Attachments.DATA.has(str(at[w])):
+				attached[str(w)] = str(at[w])
+	var wr = data.get("wear")
+	if typeof(wr) == TYPE_DICTIONARY:
+		for id in wr:
+			if Attachments.DATA.has(str(id)):
+				wear[str(id)] = clampi(int(wr[id]), 0, int(Attachments.DATA[str(id)]["durability"]))
+	_prune_attached()
 	var a = data.get("attrs")
 	if typeof(a) == TYPE_DICTIONARY:
 		for id in a:
@@ -70,6 +86,60 @@ func take_items(items: Dictionary) -> void:
 		totals[id] = int(totals.get(id, 0)) - int(items[id])
 		if totals[id] <= 0:
 			totals.erase(id)
+	_prune_attached()
+
+# --- weapon attachments ---
+
+func owned(id: String) -> int:
+	return int(totals.get(id, 0))
+
+# An attachment can go on a weapon with a free slot if there is a copy not already fitted elsewhere.
+func can_attach(weapon: String, att: String) -> bool:
+	if not WeaponData.DATA.has(weapon) or not Attachments.DATA.has(att) or attached.has(weapon):
+		return false
+	return owned(att) > attached.values().count(att)
+
+func attach(weapon: String, att: String) -> bool:
+	if not can_attach(weapon, att):
+		return false
+	attached[weapon] = att
+	return true
+
+func detach(weapon: String) -> bool:
+	return attached.erase(weapon)
+
+func shots_left(att: String) -> int:
+	return int(wear.get(att, Attachments.DATA[att]["durability"]))
+
+func is_broken(att: String) -> bool:
+	return shots_left(att) <= 0
+
+func set_wear(att: String, left: int) -> void:
+	var max_shots: int = Attachments.DATA[att]["durability"]
+	if left >= max_shots:
+		wear.erase(att)
+	else:
+		wear[att] = maxi(left, 0)
+
+# Restores an attachment to full durability for Attachments.REPAIR_SCRAP scrap, and only scrap. False (nothing
+# changes) if it is not worn or the stash is short.
+func repair(att: String) -> bool:
+	if not Attachments.DATA.has(att) or not wear.has(att) or owned("scrap") < Attachments.REPAIR_SCRAP:
+		return false
+	totals["scrap"] = owned("scrap") - Attachments.REPAIR_SCRAP
+	if totals["scrap"] <= 0:
+		totals.erase("scrap")
+	wear.erase(att)
+	return true
+
+# Drops fittings whose attachment is no longer in the stash (it was carried down a level, say).
+func _prune_attached() -> void:
+	var used := {}
+	for w in attached.keys():
+		var att: String = attached[w]
+		used[att] = int(used.get(att, 0)) + 1
+		if used[att] > owned(att):
+			attached.erase(w)
 
 # Every finished raid, win or lose, goes on the scoreboard. `level` is 1 for a raid started at the base.
 func record_raid(extracted: bool, kills: int, shots: int, hits: int, level: int) -> void:
@@ -148,7 +218,7 @@ func save() -> bool:
 	if f == null:
 		push_error("Cannot write profile to %s" % tmp)
 		return false
-	f.store_string(JSON.stringify({"version": 2, "totals": totals, "equipped": equipped,
+	f.store_string(JSON.stringify({"version": 2, "totals": totals, "attached": attached, "wear": wear, "equipped": equipped,
 		"attrs": attrs, "points": points, "difficulty": difficulty, "stats": stats}, "\t"))
 	f.close()
 	return DirAccess.rename_absolute(tmp, path) == OK

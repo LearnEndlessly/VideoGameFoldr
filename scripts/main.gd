@@ -23,6 +23,7 @@ const Hub = preload("res://scripts/hub.gd")
 const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const PauseMenu = preload("res://scripts/pause_menu.gd")
 const Scope = preload("res://scripts/scope.gd")
+const Tracer = preload("res://scripts/tracer.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
 const EXTRACT_ZONES := {
@@ -215,6 +216,11 @@ func _build_raid() -> void:
 	raid.shot_fired.connect(func(weapon_id: String): Sfx.play(WeaponData.DATA[weapon_id]["sound"]))
 	raid.dry_fire.connect(func(): Sfx.play("empty"))
 	raid.threat_started.connect(_on_threat_started)
+	raid.bullet_traced.connect(_on_bullet)
+	raid.attachment_broke.connect(func(attachment_name: String):
+		_banner.text = "%s BROKE\nRepair it with scrap at the ammo depot" % attachment_name.to_upper()
+		_banner_time = 5.0
+		Sfx.play("deny"))
 	for z in extract_zones:
 		z["area"].body_entered.connect(_on_zone_body.bind(true, z["id"]))
 		z["area"].body_exited.connect(_on_zone_body.bind(false, z["id"]))
@@ -386,7 +392,7 @@ func _process(_d: float) -> void:
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
 	_update_status_hud()
-	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status()]
+	_hud.text = "%s %s\n%s%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status(), ("\n" + raid.attachment_text()) if raid.attachment_text() != "" else ""]
 	_update_threat_hud()
 	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold RMB to zoom, R reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
@@ -454,6 +460,16 @@ func _update_threat_hud() -> void:
 		var b := nearest_extract_bearing()
 		_tick.angle = b["angle"]
 		_tick.text = "%s %.0f m" % ["SAFE" if b["zone"]["id"] == "A" else "FAST", b["distance"]]
+
+# One pellet's flight, from the muzzle to where it landed.
+func _on_bullet(weapon_id: String, end: Vector3, normal: Vector3, kind: String) -> void:
+	var t := Tracer.new()
+	t.from = _player.muzzle_position()
+	t.to = end
+	t.normal = normal
+	t.kind = kind
+	t.cfg = WeaponData.DATA[weapon_id]["tracer"]
+	add_child(t)
 
 # Esc during a raid: pause and show the controls; Esc again or the button resumes.
 func _open_pause() -> void:

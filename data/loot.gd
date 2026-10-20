@@ -7,6 +7,10 @@ const Rng = preload("res://data/rng.gd")
 const ITEMS := {
 	"ammo": {"weight": 30, "min": 5, "max": 15, "stack": 30, "shape": "bullet", "color": Color(1.0, 0.8, 0.2)},
 	"medkit": {"weight": 12, "min": 1, "max": 1, "stack": 3, "shape": "cross", "color": Color(0.9, 0.15, 0.15), "heal": 40},
+	"scrap": {"weight": 0, "min": 1, "max": 1, "stack": 30, "shape": "gear", "color": Color(0.6, 0.62, 0.66)},  # enemy drops only; repairs attachments
+	"att_heavy_barrel": {"weight": 0, "min": 1, "max": 1, "stack": 1, "shape": "diamond", "color": Color(0.8, 0.4, 1.0)},  # attachments: see data/attachments.gd
+	"att_compensator": {"weight": 0, "min": 1, "max": 1, "stack": 1, "shape": "diamond", "color": Color(0.8, 0.4, 1.0)},
+	"att_speed_loader": {"weight": 0, "min": 1, "max": 1, "stack": 1, "shape": "diamond", "color": Color(0.8, 0.4, 1.0)},
 	"repair_kit": {"weight": 0, "min": 1, "max": 1, "stack": 3, "shape": "diamond", "color": Color(0.3, 0.6, 1.0)},
 }
 

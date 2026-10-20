@@ -19,6 +19,7 @@ const WeaponData = preload("res://data/weapons.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 const UIKit = preload("res://scripts/ui_kit.gd")
+const Attachments = preload("res://data/attachments.gd")
 
 const HALF_W := 9.0
 const HALF_D := 7.0
@@ -564,6 +565,7 @@ func _fill_stash() -> void:
 
 func _fill_armory() -> void:
 	var a := _accent()
+	_label("SCRAP  %d   (the only thing that repairs attachments: %d each)" % [profile.owned("scrap"), Attachments.REPAIR_SCRAP], 13, UIKit.DIM)
 	_label("Pick the one weapon you take into raids. Weapon and character upgrades are won during a raid and are lost when it ends.", 13, UIKit.DIM)
 	var most := {"damage": 1.0, "clip": 1.0, "range": 1.0}  # the best of each stat, so the meters compare weapons
 	for id in WeaponData.DATA:
@@ -594,6 +596,42 @@ func _fill_armory() -> void:
 		var equip := _button(v, "STARTING WEAPON" if equipped else "TAKE INTO RAIDS", _equip.bind(id), equipped)
 		if equipped:
 			UIKit.mark_chosen(equip, a)
+		_attachment_slot(v, id, a)
+
+# The weapon's attachment slot: what is fitted and how worn it is, with remove and repair; or a button per spare
+# attachment in the stash. (No attachments owned, nothing shown.)
+func _attachment_slot(v: VBoxContainer, weapon_id: String, a: Color) -> void:
+	var att: String = profile.attached.get(weapon_id, "")
+	if att == "":
+		for id in Attachments.DATA:
+			if profile.can_attach(weapon_id, id):
+				_button(v, "FIT  %s" % str(Attachments.DATA[id]["name"]).to_upper(), _attach.bind(weapon_id, id))
+		return
+	var d: Dictionary = Attachments.DATA[att]
+	var left: int = profile.shots_left(att)
+	var broken := left <= 0
+	v.add_child(UIKit.label("%s%s" % [str(d["name"]).to_upper(), "   BROKEN" if broken else ""], 13, UIKit.BAD if broken else UIKit.AMBER))
+	var line := _row(v)
+	var cap := UIKit.label("WEAR", 12, UIKit.DIM)
+	cap.custom_minimum_size = Vector2(62, 0)
+	line.add_child(cap)
+	line.add_child(UIKit.meter(float(left) / float(d["durability"]), UIKit.BAD if broken else a, 90))
+	line.add_child(UIKit.label("%d" % left, 13))
+	v.add_child(UIKit.label(d["desc"], 11, UIKit.DIM))
+	_button(v, "REMOVE", _detach.bind(weapon_id))
+	_button(v, "REPAIR  %d SCRAP" % Attachments.REPAIR_SCRAP, _repair.bind(att), left >= int(d["durability"]) or profile.owned("scrap") < Attachments.REPAIR_SCRAP)
+
+func _attach(weapon_id: String, att: String) -> void:
+	if profile.attach(weapon_id, att):
+		_commit()
+
+func _detach(weapon_id: String) -> void:
+	if profile.detach(weapon_id):
+		_commit()
+
+func _repair(att: String) -> void:
+	if profile.repair(att):
+		_commit()
 
 func _fill_character() -> void:
 	var a := _accent()

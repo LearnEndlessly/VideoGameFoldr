@@ -26,9 +26,9 @@ func _init() -> void:
 	if b.totals != {"ammo": 5, "medkit": 1}:
 		failures.append("reload gave %s" % [b.totals])
 
-	# An old save that holds a removed item (scrap) loads without it.
+	# An old save that holds a removed item (not in the item table) loads without it.
 	var old := FileAccess.open(PATH, FileAccess.WRITE)
-	old.store_string('{"version": 1, "totals": {"scrap": 7, "medkit": 2}}')
+	old.store_string('{"version": 1, "totals": {"flux_core": 7, "medkit": 2}}')
 	old.close()
 	var legacy := Profile.new(PATH)
 	legacy.load_from_disk()
