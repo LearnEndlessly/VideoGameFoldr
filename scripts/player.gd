@@ -3,21 +3,21 @@ extends CharacterBody3D
 const Inventory = preload("res://scripts/inventory.gd")
 const Loot = preload("res://data/loot.gd")
 const WeaponData = preload("res://data/weapons.gd")
+const Recipes = preload("res://data/recipes.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 const Tuning = preload("res://data/tuning.gd")
+const Telemetry = preload("res://scripts/telemetry.gd")
 
 signal died
 signal inventory_toggled(open: bool)
 
 const MAX_HEALTH := 100
-const SPEED := 6.0
-const SPRINT := 10.0
-const JUMP := 6.0
 const SENS := 0.002
 
 var health := MAX_HEALTH
 var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
+var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
 var inventory_open := false
 var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
@@ -55,11 +55,25 @@ func use_slot(i: int) -> void:
 	var s = inventory.slots[i]
 	if s == null:
 		return
-	var heal: int = Loot.ITEMS[s["id"]].get("heal", 0)
+	var id: String = s["id"]
+	if _try_craft(id):
+		return
+	var heal: int = Loot.ITEMS[id].get("heal", 0)
 	if heal > 0 and health < MAX_HEALTH:
 		health = mini(health + heal, MAX_HEALTH)
 		inventory.take_one(i)
 		Sfx.play("heal")
+		Telemetry.emit("player.use.item", {"id": id, "outcome": "ok"})
+
+# If `id` is an ingredient in a recipe, ask the raid to craft it. True if a recipe applies.
+func _try_craft(id: String) -> bool:
+	for output in Recipes.DATA:
+		if Recipes.DATA[output].has(id):
+			if raid != null:
+				var ok: bool = raid.request_craft(output)
+				Telemetry.emit("player.use.item", {"id": id, "outcome": "ok" if ok else "none"})
+			return true
+	return false
 
 func take_damage(amount: int) -> void:
 	health -= amount
@@ -97,12 +111,14 @@ func _physics_process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_S): dir += transform.basis.z
 	if Input.is_physical_key_pressed(KEY_A): dir -= transform.basis.x
 	if Input.is_physical_key_pressed(KEY_D): dir += transform.basis.x
-	var speed := SPRINT if Input.is_physical_key_pressed(KEY_SHIFT) else SPEED
+	var run := Input.is_physical_key_pressed(KEY_SHIFT)
+	var speed: float = Tuning.PLAYER_SPRINT_SPEED if run else Tuning.PLAYER_WALK_SPEED
 	dir = dir.normalized() * speed
+	sprinting = run and dir.length() > 0.1  # enemies can hear this (see enemy.gd)
 	velocity.x = dir.x
 	velocity.z = dir.z
 	if is_on_floor():
-		if Input.is_physical_key_pressed(KEY_SPACE): velocity.y = JUMP
+		if Input.is_physical_key_pressed(KEY_SPACE): velocity.y = Tuning.PLAYER_JUMP_SPEED
 	else:
 		velocity.y -= 20.0 * delta
 	move_and_slide()

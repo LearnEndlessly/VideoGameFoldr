@@ -1,7 +1,7 @@
 extends RefCounted
 
 const Loot = preload("res://data/loot.gd")
-const SLOTS := 12
+const SLOTS: int = preload("res://data/tuning.gd").BACKPACK_SLOTS
 
 signal changed
 

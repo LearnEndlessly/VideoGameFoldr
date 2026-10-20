@@ -1,7 +1,7 @@
 # Tunable numbers. Edit here; scripts read them from this file.
 
 # Metres. Enemy group centres never spawn closer than this to the player's start.
-const ENEMY_GROUP_MIN_ORIGIN := 15.0
+const ENEMY_GROUP_MIN_ORIGIN := 20.0  # a fast grunt (7.2 m/s) needs over 2 s to cross the nearest member's 17 m
 # Group members spawn within +/- this many metres of their group centre.
 const GROUP_SPREAD := 2.0
 
@@ -14,7 +14,7 @@ const ENEMY_GROUP_COUNT := 3
 #   THREAT_CONTINUOUS = true:  they keep tracking the player's live position until the raid ends.
 #   THREAT_CONTINUOUS = false: one wave: they go to where the player was when it started and
 #                              resume patrolling there after THREAT_WAVE_SECONDS.
-const THREAT_DELAY_SECONDS := 180.0
+const THREAT_DELAY_SECONDS := 120.0
 const THREAT_CONTINUOUS := true
 const THREAT_WAVE_SECONDS := 60.0
 # Placement attempts per object before overlapping other objects is accepted.
@@ -35,6 +35,25 @@ const PATH_GAP := 3.0
 # shot, so 12 is twelve shots. Spent before any ammo found in crates, and never counts
 # as loot: only ammo beyond this amount can be kept on extract.
 const STARTING_AMMO := 12
+
+# Backpack size in slots (each slot holds one stack of one item).
+const BACKPACK_SLOTS := 8
+
+# Player movement, in m/s. JUMP_SPEED 7.2 with gravity 20 gives a 1.3 m jump (clears low barriers).
+const PLAYER_WALK_SPEED := 6.0
+const PLAYER_SPRINT_SPEED := 10.0
+const PLAYER_JUMP_SPEED := 7.2
+
+# How enemies notice the player. Sight needs both range and a clear line of sight (walls
+# and tall cover block it). Sprinting is loud: it is heard through walls within
+# SPRINT_NOISE_RANGE. Once alert, an enemy keeps chasing until the player is 30 m away.
+const ENEMY_SIGHT_RANGE := 18.0
+const SPRINT_NOISE_RANGE := 14.0
+
+# One enemy group is placed GUARD_DISTANCE metres outside the door of this loot area
+# ("" = no guard), so entering that area is a risk, not just a trip. Ids are in data/loot_zones.gd.
+const GUARDED_ZONE := "armory"
+const GUARD_DISTANCE := 8.0
 
 # Seconds the player must stand inside the extract zone. Leaving resets the timer.
 const EXTRACT_HOLD_SECONDS := 8.0

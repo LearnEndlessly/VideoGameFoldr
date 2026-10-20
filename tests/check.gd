@@ -21,15 +21,16 @@ func _init() -> void:
 	for i in 5000:
 		var id: String = Loot.roll(a)[0]
 		counts[id] = counts.get(id, 0) + 1
-	assert(counts["scrap"] > counts["repair_kit"], "common items must outnumber rare ones")
+	assert(counts["scrap"] > counts["medkit"], "common items must outnumber rare ones")
+	assert(not counts.has("repair_kit"), "repair_kit has weight 0 and must never drop")
 	var inv := Inventory.new()
 	assert(inv.add("medkit", 100) == 100 - 3 * Inventory.SLOTS, "overflow must be returned")
 	assert(inv.add("scrap", 1) == 1, "full backpack must reject new item types")
 	inv.take_one(0)
 	assert(inv.add("medkit", 1) == 0, "freed space must be reusable")
 	var w: Dictionary = WeaponData.DATA["scattergun"]
-	assert(WeaponData.damage_at(w, 5.0) == 12, "full damage inside effective range")
-	assert(WeaponData.damage_at(w, 15.0) < 12 and WeaponData.damage_at(w, 15.0) > 0, "falloff between effective and max")
+	assert(WeaponData.damage_at(w, 5.0) == w["damage"], "full damage inside effective range")
+	assert(WeaponData.damage_at(w, 17.0) < w["damage"] and WeaponData.damage_at(w, 17.0) > 0, "falloff between effective and max")
 	assert(WeaponData.damage_at(w, 30.0) == 0, "no damage beyond max range")
 	for name in Sounds.DATA:
 		var s := Sfx.stream_for(name)

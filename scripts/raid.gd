@@ -6,6 +6,8 @@ extends Node
 
 const Tuning = preload("res://data/tuning.gd")
 const WeaponData = preload("res://data/weapons.gd")
+const Recipes = preload("res://data/recipes.gd")
+const Telemetry = preload("res://scripts/telemetry.gd")
 
 signal picked_up(id: String, qty: int)
 signal inventory_full
@@ -29,7 +31,11 @@ var threat_continuous: bool = Tuning.THREAT_CONTINUOUS
 var threat_wave_seconds: float = Tuning.THREAT_WAVE_SECONDS
 var threat_active := false
 var elapsed := 0.0  # seconds since the raid began
+var seed_value := 0  # map seed, only logged; main may set it
+var shots := 0  # shots fired this raid
+var ammo_spent := 0
 
+var _threat_reached := false
 var _player
 var _fire_cooldown := 0.0
 var _threat_done := false  # a wave has run; it does not start again
@@ -40,6 +46,26 @@ func setup(player) -> void:
 	player.died.connect(_on_player_died)
 	if Tuning.STARTING_AMMO > 0:
 		brought["ammo"] = Tuning.STARTING_AMMO - player.inventory.add("ammo", Tuning.STARTING_AMMO)
+	Telemetry.start({"seed": seed_value, "start_ammo": Tuning.STARTING_AMMO, "threat_delay": threat_delay})
+
+# Craft one `output` from the backpack (data/recipes.gd). Needs every ingredient and room
+# for the result; otherwise nothing changes. The result is announced like a pickup.
+func request_craft(output: String) -> bool:
+	if state != State.ACTIVE or not Recipes.DATA.has(output):
+		return false
+	var recipe: Dictionary = Recipes.DATA[output]
+	var inv = _player.inventory
+	for id in recipe:
+		if inv.count(id) < int(recipe[id]):
+			return false
+	for id in recipe:
+		inv.remove(id, int(recipe[id]))
+	if inv.add(output, 1) > 0:  # no room for the result: give the ingredients back
+		for id in recipe:
+			inv.add(id, int(recipe[id]))
+		return false
+	picked_up.emit(output, 1)
+	return true
 
 # The player pulled the trigger. Checks the raid state, the weapon's cooldown and the
 # backpack's ammo; if all allow it, spends the ammo and resolves every pellet against
@@ -53,10 +79,15 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 	var cost: int = w["ammo_per_shot"]
 	if not _player.inventory.remove(item, cost):
 		dry_fire.emit()
+		Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "dry", "hits": 0, "dmg": 0, "ammo_left": _player.inventory.count(item)})
 		return false
 	if brought.has(item):
 		brought[item] = maxi(int(brought[item]) - cost, 0)  # the kit is spent first
+	shots += 1
+	ammo_spent += cost
 	shot_fired.emit(weapon_id)
+	var hits := 0
+	var total_dmg := 0
 	var space: PhysicsDirectSpaceState3D = _player.get_world_3d().direct_space_state
 	var spread: float = w["spread"]
 	for i in int(w["pellets"]):
@@ -68,19 +99,32 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		var hit: Dictionary = space.intersect_ray(query)
 		if hit and hit["collider"].has_method("take_damage"):
 			var dmg := WeaponData.damage_at(w, aim.origin.distance_to(hit["position"]))
-			if hit["collider"].take_damage(dmg):
+			hits += 1
+			total_dmg += dmg
+			var enemy = hit["collider"]
+			var kill_info := {}
+			if "stats" in enemy:  # only enemies carry type/modifier
+				kill_info = {"id": enemy.stats["type"], "mod": enemy.stats["modifier"], "group": enemy.group_id,
+					"weapon": weapon_id, "range": aim.origin.distance_to(hit["position"])}
+			if enemy.take_damage(dmg):
 				_player.kills += 1
+				Telemetry.emit("player.kill.enemy", kill_info)
+	Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "fired", "hits": hits, "dmg": total_dmg, "ammo_left": _player.inventory.count(item)})
 	return true
 
 # The player is standing in the extract zone. Starts (or continues) the hold timer.
 func request_extract() -> bool:
 	if state != State.ACTIVE:
 		return false
+	if not extracting:
+		Telemetry.emit("player.begin.extract")
 	extracting = true
 	return true
 
 # The player left the extract zone. The timer starts over next time.
 func cancel_extract() -> void:
+	if extracting:
+		Telemetry.emit("player.cancel.extract", {"held": extract_elapsed})
 	extracting = false
 	extract_elapsed = 0.0
 
@@ -88,12 +132,14 @@ func request_loot(crate) -> bool:
 	if state != State.ACTIVE or not is_instance_valid(crate):
 		return false
 	if _player.global_position.distance_to(crate.global_position) > Tuning.LOOT_REACH:
+		Telemetry.emit("player.open.crate", {"outcome": "far", "taken": {}})
 		return false
 	var taken: Dictionary = crate.take_into(_player.inventory)
 	for id in taken:
 		picked_up.emit(id, taken[id])
 	if not crate.contents.is_empty():
 		inventory_full.emit()
+	Telemetry.emit("player.open.crate", {"outcome": "ok" if crate.contents.is_empty() else "full", "taken": taken})
 	return true
 
 func _physics_process(delta: float) -> void:
@@ -101,6 +147,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
 	elapsed += delta
+	Telemetry.clock = elapsed
 	if not threat_active and not _threat_done and elapsed >= threat_delay:
 		_start_threat()
 	if threat_active:
@@ -130,6 +177,8 @@ func _loot() -> Dictionary:
 # the wave ends after threat_wave_seconds.
 func _start_threat() -> void:
 	threat_active = true
+	_threat_reached = true
+	Telemetry.emit("raid.start.clock")
 	_wave_left = threat_wave_seconds
 	get_tree().call_group("enemy", "set_converge", _player.global_position)
 	threat_started.emit()
@@ -155,4 +204,7 @@ func _finish(outcome: String) -> void:
 	if outcome == "extracted" and profile != null:
 		profile.add_items(items)
 		saved = profile.save()
-	ended.emit({"outcome": outcome, "items": items, "saved": saved})
+	Telemetry.emit("raid.end.raid", {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
+		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached})
+	Telemetry.finish()
+	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills})

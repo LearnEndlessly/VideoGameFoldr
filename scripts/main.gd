@@ -38,6 +38,7 @@ var _seed := 0
 var _last_tick := -1  # whole second of the extract timer last ticked
 var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep walkable gaps
 var _cover: Array = []  # centres of placed cover boxes
+var _guard_pos = null  # Vector3 home of the group guarding Tuning.GUARDED_ZONE, or null
 var _player: Player
 var _zone_mat := StandardMaterial3D.new()
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
@@ -90,7 +91,8 @@ func _build_raid() -> void:
 	for id in LootZones.DATA:
 		_add_structure(id, LootZones.DATA[id])
 	for g in Tuning.ENEMY_GROUP_COUNT:
-		var center: Vector3 = _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
+		var guard = _guard_pos if g == 0 else null
+		var center: Vector3 = guard if guard != null else _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
 		for i in rng.randi_range(3, 4):
 			var e := Enemy.new()
 			e.stats = Enemies.roll(rng)
@@ -116,6 +118,7 @@ func _build_raid() -> void:
 	add_child(_player)
 	raid = Raid.new()
 	raid.profile = profile
+	raid.seed_value = _seed
 	add_child(raid)
 	raid.setup(_player)
 	_player.raid = raid
@@ -179,8 +182,8 @@ func _process(_d: float) -> void:
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
-	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   Kills %d   %s %s\nLoot: %s\n%s\nWASD move, Shift sprint, Space jump, LMB shoot, E open crate, Tab backpack, Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
-		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, _player.kills, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text(), hold]
+	_hud.text = "Seed %d   Map %.0fx%.0f m   HP %d   %s %s\nLoot: %s\n%s\nWASD move, Shift sprint (loud!), Space jump, LMB shoot, E open crate, Tab backpack (click scrap to craft), Esc free mouse. Crates are only in the walled areas. Hold the green zone for %.0f s to extract." \
+		% [_seed, half_w * 2.0, half_d * 2.0, _player.health, "[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _loot_text(), _player.weapon_text(), hold]
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting
 	var second := int(raid.extract_elapsed) if raid.extracting else -1
@@ -239,6 +242,7 @@ func _on_raid_ended(result: Dictionary) -> void:
 	var subtitle := "Everything you carried this raid is lost."
 	if extracted:
 		subtitle = "Your loot is stored." if result["saved"] else "WARNING: your profile could not be saved."
+	subtitle += "  Enemies killed: %d." % result["kills"]
 	screen.show_screen("EXTRACTED" if extracted else "YOU DIED", subtitle,
 		"Kept this raid" if extracted else "Lost this raid", result["items"],
 		profile.totals, "One more run", _next_raid)
@@ -299,6 +303,24 @@ func _free_spot(hx: float, hz: float, min_origin: float, overlap_ok := true):
 		return null
 	_taken.append([p, hx, hz])
 	return p
+
+func _inside_map(p: Vector3, half: float) -> bool:
+	return absf(p.x) <= half_w - half - Tuning.PATH_GAP and absf(p.z) <= half_d - half - Tuning.PATH_GAP
+
+# Every spot GUARD_DISTANCE to GUARD_DISTANCE + 4 m from the door on `side` of the loot area
+# at `center`, within 70 degrees of straight out from the door, that is clear, inside the map
+# and at least ENEMY_GROUP_MIN_ORIGIN from the player's start. A grid, not random samples:
+# the valid region is often a thin sliver that 40 random tries missed.
+func _guard_spots(center: Vector3, size: float, side: int) -> Array:
+	var n := _side_normal(side)
+	var door := center + n * (size / 2.0)
+	var spots: Array = []
+	for a in 25:
+		for d in 5:
+			var p := door + n.rotated(Vector3.UP, -1.2 + a * 0.1) * (Tuning.GUARD_DISTANCE + d)
+			if p.length() >= Tuning.ENEMY_GROUP_MIN_ORIGIN and _inside_map(p, 3.5) and _is_clear(p, 3.5, 3.5):
+				spots.append(p)
+	return spots
 
 # Rolls a cover box and places it: at a random clear spot, or exactly at `at` if given
 # and clear. Skipped (nothing placed) when it doesn't fit with a walkable gap.
@@ -361,7 +383,25 @@ func _add_structure(id: String, zone: Dictionary) -> void:
 	var size: float = zone["size"]
 	var half := size / 2.0 + 0.3
 	var center: Vector3 = _free_spot(half, half, 10.0)
-	var door_side := rng.randi_range(0, 3)
+	# The guarded area's door goes on a side that has room for the guard group outside it,
+	# and the guard spot is reserved now, before later areas, shelters and cover take it.
+	var door_side := -1
+	if id == Tuning.GUARDED_ZONE:
+		var first := rng.randi_range(0, 3)
+		for k in 4:
+			var spots := _guard_spots(center, size, (first + k) % 4)
+			if not spots.is_empty():
+				door_side = (first + k) % 4
+				_guard_pos = spots[rng.randi_range(0, spots.size() - 1)]
+				_taken.append([_guard_pos, 3.5, 3.5])
+				break
+	# Otherwise the door faces toward the middle of the map, never at a nearby outer wall.
+	if door_side < 0:
+		var door_sides: Array = []
+		for s in 4:
+			if _side_normal(s).dot(center.normalized()) < 0.0:
+				door_sides.append(s)
+		door_side = door_sides[rng.randi_range(0, door_sides.size() - 1)] if not door_sides.is_empty() else rng.randi_range(0, 3)
 	_add_room(center, size, door_side, 4.0, 2.8, 0.5, zone["wall_color"])
 	var floor_mark := MeshInstance3D.new()
 	var fm := BoxMesh.new()

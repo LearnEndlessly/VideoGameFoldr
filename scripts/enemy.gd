@@ -2,9 +2,9 @@ extends CharacterBody3D
 
 const Sfx = preload("res://scripts/sfx.gd")
 const Tuning = preload("res://data/tuning.gd")
+const Telemetry = preload("res://scripts/telemetry.gd")
 
 const REACH := 1.8
-const SIGHT := 18.0         # a patrolling enemy notices the player inside this range
 const LOSE := 30.0          # an alert enemy loses the player beyond this range
 const GIVE_UP := 4.0        # seconds out of reach before going back to patrol
 const PATROL_RADIUS := 8.0
@@ -116,7 +116,11 @@ func end_converge() -> void:
 	_target = home
 
 # One enemy noticing the player (or being shot) wakes its whole group.
-func alert_pack() -> void:
+func alert_pack(cause: String = "sight") -> void:
+	if not alert:  # the first enemy to notice reports for the group
+		var p = get_tree().get_first_node_in_group("player")
+		Telemetry.emit("enemy.alert.group", {"group": group_id, "cause": cause,
+			"dist": global_position.distance_to(p.global_position) if p != null else -1.0})
 	get_tree().call_group("pack_%d" % group_id, "set_alert", true)
 
 func _update_label() -> void:
@@ -127,7 +131,7 @@ func take_damage(amount: int) -> bool:
 	if health <= 0:  # already dead this frame (e.g. a later pellet of the same shot)
 		return false
 	health -= amount
-	alert_pack()
+	alert_pack("shot")
 	if health <= 0:
 		Sfx.play("kill", global_position)
 		queue_free()
@@ -153,8 +157,8 @@ func _physics_process(delta: float) -> void:
 		to_player.y = 0.0
 		dist = to_player.length()
 
-	if not alert and dist < SIGHT:
-		alert_pack()
+	if not alert and _notices(player, dist):
+		alert_pack("noise" if player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE else "sight")
 
 	if alert:
 		if dist > LOSE:
@@ -171,6 +175,8 @@ func _physics_process(delta: float) -> void:
 					_attack_cd = 1.0
 					Sfx.play("enemy_strike", global_position)
 					player.take_damage(stats["damage"])
+					Telemetry.emit("enemy.hit.player", {"id": stats["type"], "mod": stats["modifier"], "group": group_id,
+						"dmg": stats["damage"], "hp_after": player.health})
 	elif converging:
 		var to_c := converge_target - global_position
 		to_c.y = 0.0
@@ -189,6 +195,32 @@ func _physics_process(delta: float) -> void:
 	velocity.y = velocity.y - 20.0 * delta if not is_on_floor() else 0.0
 	move_and_slide()
 	_footsteps(delta, player)
+
+# A patrolling enemy notices the player by hearing them sprint (through walls, close
+# range) or by seeing them (longer range, needs a clear line of sight). dist is INF
+# when the player is sheltered, so neither works then.
+func _notices(player, dist: float) -> bool:
+	if player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE:
+		return true
+	return dist < Tuning.ENEMY_SIGHT_RANGE and _has_line_of_sight(player)
+
+# Casts from this enemy's eyes to the player's chest. Walls and cover block it; other
+# enemies in the way do not.
+func _has_line_of_sight(player) -> bool:
+	var from := global_position + Vector3(0, 1.4 * float(stats["size"]), 0)
+	var to: Vector3 = player.global_position + Vector3(0, 1.2, 0)
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var skip: Array[RID] = [get_rid(), player.get_rid()]
+	for i in 5:
+		var query := PhysicsRayQueryParameters3D.create(from, to)
+		query.exclude = skip
+		var hit: Dictionary = space.intersect_ray(query)
+		if hit.is_empty():
+			return true
+		if not hit["collider"] is CharacterBody3D:
+			return false
+		skip.append(hit["rid"])
+	return false
 
 # Heavier enemies take longer strides and sound lower.
 func _footsteps(delta: float, player) -> void:

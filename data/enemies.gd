@@ -8,7 +8,7 @@ const TYPES := {
 const MODIFIER_CHANCE := 0.25
 const MODIFIERS := {
 	"armored": {"weight": 1, "health_mult": 2.0},
-	"fast": {"weight": 1, "speed_mult": 1.5},
+	"fast": {"weight": 1, "speed_mult": 2.4},  # a fast grunt (7.2 m/s) outruns a walking player
 }
 
 # Returns a stats dictionary: the type's stats plus a "type" and "modifier" name.

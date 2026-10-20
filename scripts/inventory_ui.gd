@@ -3,6 +3,7 @@ extends PanelContainer
 
 const Inventory = preload("res://scripts/inventory.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
+const Recipes = preload("res://data/recipes.gd")
 
 var _player
 var _title := Label.new()
@@ -49,11 +50,18 @@ func _refresh() -> void:
 		var s = _player.inventory.slots[i]
 		_icons[i].item_id = "" if s == null else s["id"]
 		_qtys[i].text = "" if s == null else str(s["qty"])
-		_buttons[i].tooltip_text = "" if s == null else s["id"].replace("_", " ")
+		_buttons[i].tooltip_text = "" if s == null else _tooltip(s["id"])
 		if s != null:
 			used += 1
 	_title.text = "Backpack %d/%d   click: use   right-click: drop   (the game keeps running)" \
 		% [used, Inventory.SLOTS]
+
+func _tooltip(id: String) -> String:
+	var text := id.replace("_", " ")
+	for output in Recipes.DATA:
+		if Recipes.DATA[output].has(id):
+			text += "\nclick: craft 1 %s (%d %s)" % [output, Recipes.DATA[output][id], text]
+	return text
 
 func _on_slot_input(event: InputEvent, i: int) -> void:
 	if event is InputEventMouseButton and event.pressed:

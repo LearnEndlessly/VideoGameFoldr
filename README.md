@@ -18,10 +18,10 @@ Target loop: **Hub** (build, skill tree, stash) -> **Raid** (small bounded proce
 
 ## What exists now (all playable, placeholder primitives only)
 - **Map:** generated from a seed. The floor is always about 3600 m2 but its shape varies from long and narrow to wide to nearly square (`MAP_*` in `data/tuning.gd`). Contents: perimeter walls, five cover shapes (fat block, tall pillar, thin slab, long low barrier, small block; `data/scenery.gd`), 3 loot areas, 2 shelters, 5 enemy groups, and the extract zone at one end of the long axis. Objects keep at least `PATH_GAP` (3 m) of walkable space between them, and cover that doesn't fit is skipped. Same seed gives the same map and crate contents. Replay one with `-- <seed>` on the command line. Changing any generation code changes what old seeds produce.
-- **Loot areas** (`data/loot_zones.gd`): crates exist only inside three walled compounds, one of each per map: Supply Depot (large, 4-5 crates, mostly scrap, quantities x1.5), Armory (medium, 2-3 crates, mostly ammo, x2), Med Post (small, 2 crates, mostly medkits and repair kits, x1). Each has its own pool, rolls per crate, and quantity multiplier, plus its own wall and crate colours.
+- **Loot areas** (`data/loot_zones.gd`): crates exist only inside three walled compounds, one of each per map: Supply Depot (large, 4-5 crates, mostly scrap, quantities x1.5), Armory (medium, 2-3 crates, mostly ammo, x1, guarded by an enemy group near its door), Med Post (small, 2 crates, mostly medkits, x1). Each has its own pool, rolls per crate, and quantity multiplier, plus its own wall and crate colours.
 - **Player:** first-person controller (WASD, Shift sprint, Space jump), 100 HP, `E` opens crates, `Tab` toggles the backpack, `1`/`2` switch weapons.
 - **Weapons:** Pistol (25 dmg, full damage to 25 m, falls off to 60 m) and Scattergun (7 pellets x 12 dmg, full to 8 m, falls off to 22 m). Damage falls off linearly to 30% at max range. An aim line shows green out to effective range and orange through the falloff zone, with a dot where the aim lands.
-- **Inventory:** 12 slots, stackable, drawn symbols per item (gear, bullet, cross, diamond), click to use, right-click to drop. Crates keep what does not fit.
+- **Inventory:** 8 slots (`BACKPACK_SLOTS`), stackable, drawn symbols per item (gear, bullet, cross, diamond), click to use (medkits heal, a stack of 10+ scrap crafts one medkit), right-click to drop. Crates keep what does not fit.
 - **Enemies:** 3 groups of 3-4 (`ENEMY_GROUP_COUNT` in `data/tuning.gd`; set it to 5 for busier maps). Types: grunt and brute. 25% chance of a modifier (armored = 2x health, fast = 1.5x speed). Groups patrol an area, turn yellow when they notice you or are shot (the whole group alerts), and give up after 4 s out of reach. A health bar sits above each one (blue frame = armored).
 - **Shelters:** small (3.6 m) nooks coloured like the cover, with no marker or label, door facing a random way, and up to three cover pieces placed in front of the door to hide it. Standing inside makes you invisible to enemies and they lose track of you; the HUD shows `[SAFE]`.
 - **Enemy sound by distance:** enemy sounds are 3D: louder and more to the left or right as they get nearer (`SOUND_UNIT_SIZE` in `data/tuning.gd`; smaller = steeper falloff). Footsteps are heard out to 40 m. Stereo or headphones give left/right direction; there is no up/down or front/back cue.
@@ -33,7 +33,7 @@ Target loop: **Hub** (build, skill tree, stash) -> **Raid** (small bounded proce
 - **Version control:** git, branch `main`.
 
 ## Known gaps (not built)
-A stash UI (the profile only stores totals; nothing is brought *into* a raid yet); weapon durability and repair; a secondary-ability system; skill tree and XP; base building; **scrap and repair kits have no use**; enemy loot drops; enemy pathfinding (they get stuck behind cover); music and ambience (effects are synthesized beeps, written without being heard, so levels are unverified); animation; art; settings or menus; export builds.
+A stash UI (the profile only stores totals; nothing is brought *into* a raid yet); weapon durability and repair; a secondary-ability system; skill tree and XP; base building; **repair kits never drop** (weight 0) until a durability system exists, and scrap only crafts medkits; enemy loot drops; enemy pathfinding (they get stuck behind cover); music and ambience (effects are synthesized beeps, written without being heard, so levels are unverified); animation; art; settings or menus; export builds.
 
 ## Architecture (read this first)
 - Godot 4.7.2 at `D:\Godot_v4.7.2-stable_win64.exe`. Open `project.godot`, press F5.
@@ -51,6 +51,8 @@ check.gd         # RNG determinism, loot weights, inventory, damage falloff
 smoke.gd         # opens crates, uses items, shoots, alerts a pack
 spawn_safety.gd  # 60 maps: no enemy group near the player's start; 20 maps: no damage in the first 2 s. Exit code 1 on failure.
 map_layout.gd    # 40 maps: shapes vary, 3 loot areas, crates only inside them, and every key place is walkable from the start. Exit code 1 on failure.
+rebalance.gd     # the design changes below: repair kits never drop, crafting, line of sight and sprint noise, guarded armory, backpack size. Exit code 1 on failure.
+telemetry.gd     # event log: valid JSON lines, start/end events, naming grammar, enabled flag. Exit code 1 on failure.
 profile_unit.gd  # profile save/load round trip, overwrite, corrupt-file recovery. Exit code 1 on failure.
 ammo_threat.gd   # ammo cost, cooldown, empty weapon, starting-kit rule, group count, threat clock (continuous, wave, control). Exit code 1 on failure.
 profile_flow.gd  # real raids: extract keeps items in the JSON, death keeps nothing, leaving the zone resets the timer,
@@ -79,7 +81,31 @@ The profile tests print a JSON parse error once; that is the deliberate corrupt-
 ## Phase 3 notes: the drain and the clock
 - **Ammo:** every shot spends backpack ammo (pistol 1, scattergun 2; `ammo_per_shot` in `data/weapons.gd`). An empty weapon cannot fire (dry-fire click, HUD shows `[NO AMMO]`). The HUD shows ammo for the current weapon.
 - **Starting kit:** every raid starts with `STARTING_AMMO` (12) rounds. They are spent before any ammo you loot, and they never count as loot: on extract or death only what you hold *beyond the unspent kit* is kept or lost. This stops a player from farming ammo into the profile by extracting with the free kit. If you drop or use items so you hold less than the unspent kit, nothing is kept for that item.
-- **Threat clock:** `THREAT_DELAY_SECONDS` (180) into a raid, every group stops patrolling and heads for the player's position, with a red HUD banner, an alarm sound, and a `[PATROLS CONVERGING]` tag. `THREAT_CONTINUOUS` chooses the style: `true` = they keep tracking your live position for the rest of the raid; `false` = one wave, sent to where you were when it started, ending after `THREAT_WAVE_SECONDS` (60), after which they patrol where they stand. Converging enemies still need to see you to attack and cannot see into shelters, so a sheltered player is camped outside rather than attacked; there is no pathfinding, so some get stuck behind cover.
-- **Tuning values to look at first** (`data/tuning.gd`): `STARTING_AMMO` (12), `THREAT_DELAY_SECONDS` (180), `THREAT_CONTINUOUS` (true), `ENEMY_GROUP_COUNT` (3), `EXTRACT_HOLD_SECONDS` (8). Per-weapon ammo cost is in `data/weapons.gd`.
+- **Threat clock:** `THREAT_DELAY_SECONDS` (120) into a raid, every group stops patrolling and heads for the player's position, with a red HUD banner, an alarm sound, and a `[PATROLS CONVERGING]` tag. `THREAT_CONTINUOUS` chooses the style: `true` = they keep tracking your live position for the rest of the raid; `false` = one wave, sent to where you were when it started, ending after `THREAT_WAVE_SECONDS` (60), after which they patrol where they stand. Converging enemies still need to see you to attack and cannot see into shelters, so a sheltered player is camped outside rather than attacked; there is no pathfinding, so some get stuck behind cover.
+- **Tuning values to look at first** (`data/tuning.gd`): `STARTING_AMMO` (12), `THREAT_DELAY_SECONDS` (120), `THREAT_CONTINUOUS` (true), `ENEMY_GROUP_COUNT` (3), `EXTRACT_HOLD_SECONDS` (8). Per-weapon ammo cost is in `data/weapons.gd`.
 - **Assumptions:** (1) one ammo type is shared by both weapons; (2) the fire cooldown is shared across weapons and lives in the raid, so switching weapons does not skip it; (3) the threat clock counts from raid start and ignores time spent in menus (the world is paused then); (4) the old `GROUP_COUNT` of 5 was replaced, so old seeds make different maps; (5) the unit tests shorten the threat timers per raid through `raid.threat_*` variables rather than changing the tuning file.
 - **Tests added:** `ammo_threat.gd` covers ammo cost and cooldown, damage applied by the simulation, empty-weapon refusal, the starting-kit loot rule, the group count, continuous and wave threat behaviour, and a control with no threat. Checked that it fails when ammo is not spent and when the threat order is dropped or stops following the player.
+
+## Rebalance notes (from docs/DESIGN_METRICS.md)
+An analysis of the generated maps and data tables (see `docs/DESIGN_METRICS.md`; it has no player data, so behaviour claims there are hypotheses) led to these changes:
+
+| Change | Old -> new |
+|---|---|
+| Repair kits | drop weight 8/5/15/25 -> 0 everywhere (item row kept for future durability) |
+| Scrap sink | none -> a stack of 10+ scrap, clicked in the backpack, crafts 1 medkit (`data/recipes.gd`, `Raid.request_craft()`) |
+| Ammo supply | Armory x2.0 -> x1.0; Depot ammo weight 25 -> 15 |
+| Scattergun | 7x12 dmg, full to 8 m, max 22 m -> 8x14 dmg, full to 10 m, max 24 m (about 2.2x the pistol's damage per ammo up close, under half its range) |
+| "fast" modifier | speed x1.5 -> x2.4 (a fast grunt at 7.2 m/s outruns a walking player, not a sprinting one) |
+| Aggro | distance only, through walls -> sight (18 m) needs a clear line of sight (walls and tall cover block it; other enemies do not); sprinting is heard through walls within 14 m |
+| Backpack | 12 -> 8 slots |
+| Jump | 0.9 m -> 1.3 m (tuned rather than cut, so it clears low barriers) |
+| Threat clock | 180 -> 120 s |
+| Armory | now guarded: enemy group 0 spawns 8-12 m from its door (about 29 of 30 maps) |
+| Kill counter | removed from the HUD, shown on the results screen |
+| Group spawn distance | 15 -> 20 m (needed: a fast grunt could otherwise reach the player within the 2 s start grace) |
+
+Not done, on purpose: merging cover shapes (low confidence), a second ammo type, stamina. Loot-area doors now face the middle of the map.
+
+**Telemetry (first slice).** The raid writes one JSON line per event to `user://telemetry/raid_<time>_<seed>.jsonl` (on Windows, `%APPDATA%\Godotpp_userdata\VideoGame Beta	elemetry`). It is off in headless runs, so tests do not write files. Events follow the `subject.verb.object` grammar in the design doc: raid start/end, fire (fired or dry), kill, crate open, extract begin/cancel, threat clock start, group alert (with cause), enemy hit on player, item use. To summarise logs: `Godot --headless --path <project> -s tools/summarize_telemetry.gd -- <file or folder>` prints extract rate, raid duration, threat-clock reach, ammo burn, dry-fire rate, item use-through, damage taken per kill and time to first alert. Gaps: the doc's common fields `pos`, `zone` and `hp` are not on every line, and the `threat` alert cause is never emitted (converging enemies do not call the alert path).
+
+**Assumptions to check when playtesting:** (1) 8 slots and the 120 s clock are guesses from simulation, not play; (2) sprint noise at 14 m and sight at 18 m are first values; (3) one medkit per 10 scrap may make healing too cheap or too dear; (4) the guarded armory, sprint noise and line of sight together may make the first minute much harder, so look at damage per kill and time to first alert first.
