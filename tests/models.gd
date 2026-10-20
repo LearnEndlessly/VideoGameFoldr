@@ -32,6 +32,13 @@ func _capsule_visible(e: Node) -> bool:
 			return c.visible
 	return false
 
+# The weapon model currently held in the view (ignores one already queued for deletion).
+func _held(player) -> Node:
+	for c in player._cam.get_children():
+		if str(c.name).begins_with("Viewmodel") and not c.is_queued_for_deletion():
+			return c
+	return null
+
 func _init() -> void:
 	await process_frame
 	# The loader.
@@ -70,13 +77,16 @@ func _init() -> void:
 	var player = Player.new()
 	root.add_child(player)
 	await process_frame
-	_check(player._cam.get_node_or_null("Viewmodel") == null, "no weapon model: nothing should be held")
 	var w: Dictionary = WeaponData.DATA["pistol"].duplicate()
-	w["model"] = FIXTURE
-	w["model_scale"] = 0.5
+	w["model"] = ""
 	player.weapon = w
 	player._show_viewmodel()
-	var held = player._cam.get_node_or_null("Viewmodel")
+	await process_frame  # a model held from the data table is freed
+	_check(_held(player) == null, "no weapon model: nothing should be held")
+	w["model"] = FIXTURE
+	w["model_scale"] = 0.5
+	player._show_viewmodel()
+	var held = _held(player)
 	_check(held != null, "weapon model path: a Viewmodel should be held")
 	if held != null:
 		_check(held.scale.is_equal_approx(Vector3.ONE * 0.5), "model_scale should apply to the weapon model")

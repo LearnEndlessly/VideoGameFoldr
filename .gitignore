@@ -15,3 +15,6 @@ export_credentials.cfg
 Thumbs.db
 .DS_Store
 *.tmp
+
+# Raw Kenney downloads kept for reference (only files copied into assets/ are used)
+kenney_*/

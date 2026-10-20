@@ -49,5 +49,10 @@ func _init() -> void:
 	assert(Loot.roll(a, {"medkit": 1}, 3.0) == ["medkit", 3], "pool and quantity multiplier must apply")
 	for weapon_id in WeaponData.DATA:
 		assert(Sounds.DATA.has(WeaponData.DATA[weapon_id]["sound"]), "weapon %s has no sound" % weapon_id)
+	# Every art path named in a data table must exist (after the first Godot import on a fresh clone).
+	for table in [WeaponData.DATA, Enemies.TYPES]:
+		for row_id in table:
+			var model_path: String = table[row_id].get("model", "")
+			assert(model_path == "" or ResourceLoader.exists(model_path), "%s names a model that does not exist: %s" % [row_id, model_path])
 	print("checks passed: ", counts)
 	quit()
