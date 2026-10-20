@@ -29,6 +29,14 @@ const SPAWNER_MIN_ORIGIN := 25.0
 const THREAT_DELAY_SECONDS := 120.0
 const THREAT_CONTINUOUS := true
 const THREAT_WAVE_SECONDS := 60.0
+# HUD for the threat clock: a countdown from the start of the raid that turns amber at
+# THREAT_COUNTDOWN_AMBER_SECONDS left and red at THREAT_COUNTDOWN_RED_SECONDS. Once the clock has fired it is
+# replaced by a "converging" indicator, and (if THREAT_EXTRACT_TICK) a small arrow on a ring of
+# THREAT_TICK_RADIUS px around the crosshair points toward the nearest extract zone.
+const THREAT_COUNTDOWN_AMBER_SECONDS := 30.0
+const THREAT_COUNTDOWN_RED_SECONDS := 10.0
+const THREAT_EXTRACT_TICK := true
+const THREAT_TICK_RADIUS := 110.0
 # Placement attempts per object before overlapping other objects is accepted.
 const SPAWN_TRIES := 200
 

@@ -18,6 +18,7 @@ const ItemIcon = preload("res://scripts/item_icon.gd")
 const AmmoBar = preload("res://scripts/ammo_bar.gd")
 const Crosshair = preload("res://scripts/crosshair.gd")
 const Spawner = preload("res://scripts/spawner.gd")
+const DirectionTick = preload("res://scripts/direction_tick.gd")
 const Hub = preload("res://scripts/hub.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
@@ -49,7 +50,7 @@ var extract_cfg := {"a_min_path": Tuning.EXTRACT_A_MIN_PATH, "b_min_path": Tunin
 	"b_max_path": Tuning.EXTRACT_B_MAX_PATH, "min_separation": Tuning.EXTRACT_MIN_SEPARATION,
 	"min_base_distance": Tuning.EXTRACT_MIN_BASE_DISTANCE, "b_hold": Tuning.EXTRACT_B_HOLD_SECONDS,
 	"b_noise_radius": Tuning.EXTRACT_B_NOISE_RADIUS, "beam_reveal_radius": Tuning.EXTRACT_BEAM_REVEAL_RADIUS,
-	"beam_always_visible": Tuning.EXTRACT_BEAM_ALWAYS_VISIBLE}
+	"beam_always_visible": Tuning.EXTRACT_BEAM_ALWAYS_VISIBLE, "threat_tick": Tuning.THREAT_EXTRACT_TICK}
 var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
@@ -73,6 +74,8 @@ var _extract_box: VBoxContainer
 var _extract_label: Label
 var _extract_bar: ProgressBar
 var _banner: Label
+var _threat_label: Label  # top right: the threat clock countdown, then "converging"
+var _tick: Control  # arrow toward the nearest extract zone, after the threat clock fires
 var _banner_time := 0.0
 var _hp_bar: ProgressBar
 var _stats_label: Label
@@ -222,6 +225,18 @@ func _build_raid() -> void:
 	_banner.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_banner.offset_top = 140  # below the extract countdown, clear of the HUD text
+	_threat_label = Label.new()
+	_threat_label.add_theme_font_size_override("font_size", 22)
+	_threat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	layer.add_child(_threat_label)
+	_threat_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_threat_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_threat_label.offset_top = 14
+	_threat_label.offset_right = -16
+	_tick = DirectionTick.new()
+	_tick.radius = Tuning.THREAT_TICK_RADIUS
+	layer.add_child(_tick)
+	_tick.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	add_child(layer)
 
 func _build_extract_hud(layer: CanvasLayer) -> void:
@@ -317,7 +332,8 @@ func _process(_d: float) -> void:
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
 	_update_status_hud()
-	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _enemy_status()]
+	_hud.text = "%s\n%s" % ["[SAFE]" if _player.safe else "", _enemy_status()]
+	_update_threat_hud()
 	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
@@ -338,6 +354,52 @@ func _process(_d: float) -> void:
 func _on_picked_up(id: String, qty: int) -> void:
 	Sfx.play("pickup")
 	_feed_row(id, "+%d %s" % [qty, id.replace("_", " ")])
+
+# What the threat clock HUD shows now: {"mode": "countdown" | "converging" | "none", "seconds", "tone": "normal" |
+# "amber" | "red"}. A countdown from the start of the raid; amber and red as it runs low; once it has fired,
+# "converging" for as long as patrols are converging.
+func threat_hud_state() -> Dictionary:
+	var left: float = raid.threat_countdown()
+	if left >= 0.0:
+		var tone := "red" if left <= Tuning.THREAT_COUNTDOWN_RED_SECONDS else ("amber" if left <= Tuning.THREAT_COUNTDOWN_AMBER_SECONDS else "normal")
+		return {"mode": "countdown", "seconds": left, "tone": tone}
+	if raid.threat_active:
+		return {"mode": "converging", "seconds": 0.0, "tone": "red"}
+	return {"mode": "none", "seconds": 0.0, "tone": "normal"}
+
+# The extract zone nearest the player (straight line) and the arrow's angle to it: 0 = straight ahead.
+func nearest_extract_bearing() -> Dictionary:
+	var best: Dictionary = extract_zones[0]
+	var p := _player.global_position
+	for z in extract_zones:
+		if Vector2(p.x - z["pos"].x, p.z - z["pos"].z).length() < Vector2(p.x - best["pos"].x, p.z - best["pos"].z).length():
+			best = z
+	var to := Vector3(best["pos"].x - p.x, 0, best["pos"].z - p.z)
+	var local := _player.global_transform.basis.inverse() * to
+	return {"zone": best, "angle": atan2(local.x, -local.z), "distance": to.length()}
+
+# True when the arrow toward the nearest extract zone is up: only after the clock has fired, and only if
+# the setting is on.
+func tick_shown() -> bool:
+	return bool(extract_cfg["threat_tick"]) and raid.threat_fired() and raid.state == raid.State.ACTIVE
+
+func _update_threat_hud() -> void:
+	var st := threat_hud_state()
+	var colors := {"normal": Color(1, 1, 1, 0.9), "amber": Color(1, 0.75, 0.1), "red": Color(1, 0.2, 0.2)}
+	_threat_label.add_theme_color_override("font_color", colors[st["tone"]])
+	match st["mode"]:
+		"countdown":
+			var secs := int(ceil(st["seconds"]))
+			_threat_label.text = "THREAT CLOCK  %d:%02d" % [secs / 60, secs % 60]
+		"converging":
+			_threat_label.text = "PATROLS CONVERGING"
+		_:
+			_threat_label.text = ""
+	_tick.shown = tick_shown()
+	if _tick.shown:
+		var b := nearest_extract_bearing()
+		_tick.angle = b["angle"]
+		_tick.text = "%s %.0f m" % ["SAFE" if b["zone"]["id"] == "A" else "FAST", b["distance"]]
 
 func _on_threat_started() -> void:
 	_banner.text = "THEY KNOW WHERE YOU ARE\nPatrols are closing in and will keep coming" if raid.threat_continuous \

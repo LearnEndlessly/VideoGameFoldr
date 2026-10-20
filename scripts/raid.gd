@@ -303,6 +303,16 @@ func _loot() -> Dictionary:
 # Every enemy heads for the player's position. In continuous mode _physics_process keeps
 # updating the target to the live position; in wave mode it is the position right now and
 # the wave ends after threat_wave_seconds.
+# Seconds until the threat clock fires, or -1 once it has (or if this raid never has one).
+func threat_countdown() -> float:
+	if _threat_reached or threat_delay <= 0.0 or threat_delay >= 1.0e6:
+		return -1.0
+	return maxf(threat_delay - elapsed, 0.0)
+
+# True once the threat clock has fired, even if a wave has since ended.
+func threat_fired() -> bool:
+	return _threat_reached
+
 func _start_threat() -> void:
 	threat_active = true
 	_threat_reached = true
