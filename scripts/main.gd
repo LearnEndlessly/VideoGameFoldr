@@ -18,16 +18,21 @@ const ItemIcon = preload("res://scripts/item_icon.gd")
 const AmmoBar = preload("res://scripts/ammo_bar.gd")
 const Crosshair = preload("res://scripts/crosshair.gd")
 const Spawner = preload("res://scripts/spawner.gd")
+const Hub = preload("res://scripts/hub.gd")
 
 const COVER_ATTEMPTS := 30  # cover boxes that don't fit with a walkable gap are skipped
 const SHELTER_COUNT := 2
 
-# The first launch shows the start screen; "one more run" skips it. Survives scene reloads.
+# True: build the base (scripts/hub.gd) instead of a raid. The game opens there, and extracting or dying
+# returns to it; the raid terminal clears it. Survives scene reloads.
 static var show_start := true
+# The map seed picked at the base's map table for the next raid; -1 = none picked.
+static var chosen_seed := -1
 
 var rng := RandomNumberGenerator.new()
 var seed_override := -1  # tests set these before add_child
-var profile_path := Tuning.PROFILE_PATH
+# The VG_PROFILE environment variable moves the default save (the test runner uses it so tests never touch the real one).
+var profile_path: String = OS.get_environment("VG_PROFILE") if OS.has_environment("VG_PROFILE") else Tuning.PROFILE_PATH
 var profile: Profile
 var raid: Raid
 var extract_pos := Vector3.ZERO
@@ -35,6 +40,7 @@ var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
 var shelters: Array = []  # Vector3 centres of the safe nooks
+var blocks: Array = []  # [size, centre, colour] of every box added, for the base's map table
 var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
 var _seed := 0
@@ -65,28 +71,20 @@ func _ready() -> void:
 	profile = Profile.new(profile_path)
 	profile.load_from_disk()
 	if show_start:
-		_show_start_screen()
+		_build_hub()
 	else:
 		_build_raid()
 
-func _show_start_screen() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	var screen := ScreenUI.new()
-	layer.add_child(screen)
-	var hold: float = Tuning.EXTRACT_HOLD_SECONDS
-	screen.show_screen("EXTRACTION PROTOTYPE",
-		"Loot crates, then reach the green zone and hold it for %.0f seconds to bring your loot home. If you die, everything you carried this raid is lost." % hold,
-		"", {}, profile.totals, "Start raid", _next_raid)
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+func _build_hub() -> void:
+	var hub := Hub.new()
+	hub.profile = profile
+	hub.start_raid = _next_raid
+	hub.preview_fn = Callable(self, "preview")
+	add_child(hub)
 
-func _build_raid() -> void:
-	get_tree().paused = false
-	# Pass a seed after `--` on the command line to replay a map.
-	var args := OS.get_cmdline_user_args()
-	_seed = seed_override if seed_override >= 0 else (int(args[0]) if args.size() > 0 else randi())
-	rng.seed = _seed
-
+# Generates the whole map from rng (already seeded): floor, walls, extract zone, loot rooms, enemy groups,
+# enemy bases, shelters and cover. Returns the extract zone. Needs no scene tree, so preview() can run it.
+func _build_map() -> Area3D:
 	_roll_map_size()
 	var wall_color := Color(0.4, 0.4, 0.45)
 	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3))
@@ -117,6 +115,21 @@ func _build_raid() -> void:
 	_place_shelters()
 	for i in COVER_ATTEMPTS:
 		_place_cover()
+	return zone
+
+func _build_raid() -> void:
+	get_tree().paused = false
+	# Pass a seed after `--` on the command line to replay a map.
+	var args := OS.get_cmdline_user_args()
+	if seed_override >= 0:
+		_seed = seed_override
+	elif chosen_seed >= 0:  # picked at the base's map table
+		_seed = chosen_seed
+		chosen_seed = -1
+	else:
+		_seed = int(args[0]) if args.size() > 0 else randi()
+	rng.seed = _seed
+	var zone := _build_map()
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
@@ -129,8 +142,12 @@ func _build_raid() -> void:
 
 	_player = Player.new()
 	add_child(_player)
+	_player.apply_profile(profile)  # the base's upgrades: attributes and the starting weapon
 	raid = Raid.new()
 	raid.profile = profile
+	for id in WeaponData.DATA:
+		raid.damage_mult[id] = profile.damage_mult(id)
+	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
 	raid.seed_value = _seed
 	raid.map_info = _map_info()
 	add_child(raid)
@@ -257,6 +274,7 @@ func _update_status_hud() -> void:
 	var w: Dictionary = _player.weapon
 	var shown: int = raid.shown_rounds(id)
 	var held: int = _player.inventory.count(w["ammo_item"])
+	_hp_bar.max_value = _player.max_health
 	_hp_bar.value = _player.health
 	_stats_label.text = "HP %d   FRAGS %d   SHOTS %d" % [_player.health, _player.kills, raid.shots]
 	_ammo_bar.total = w["clip"]
@@ -333,13 +351,36 @@ func _on_raid_ended(result: Dictionary) -> void:
 	layer.add_child(screen)
 	var subtitle := "Everything you carried this raid is lost."
 	if extracted:
-		subtitle = "Your loot is stored." if result["saved"] else "WARNING: your profile could not be saved."
+		subtitle = "Your loot is stored in the base." if result["saved"] else "WARNING: your profile could not be saved."
+		subtitle += "  +%d attribute point(s): spend them at the Character station." % result["points"]
 	subtitle += "  Enemies killed: %d." % result["kills"]
 	screen.show_screen("EXTRACTED" if extracted else "YOU DIED", subtitle,
 		"Kept this raid" if extracted else "Lost this raid", result["items"],
-		profile.totals, "One more run", _next_raid)
+		profile.totals, "Return to base", _return_to_base)
 
-func _next_raid() -> void:
+func _return_to_base() -> void:
+	show_start = true
+	get_tree().paused = false
+	get_tree().reload_current_scene.call_deferred()
+
+# The map a seed makes, as data for the base's map table: builds the map's nodes off the scene tree,
+# reads them back, and frees them. The same seed gives the same map in the raid.
+func preview(map_seed: int) -> Dictionary:
+	var m = load("res://scripts/main.gd").new()
+	m.rng.seed = map_seed
+	m._build_map()
+	var groups := {}
+	for c in m.get_children():
+		if "stats" in c:
+			groups[c.home] = true
+	var data := {"w": m.half_w * 2.0, "d": m.half_d * 2.0, "blocks": m.blocks, "extract": m.extract_pos,
+		"spawners": m._spawners.map(func(sp): return sp.position), "groups": groups.keys(),
+		"rooms": m.structures.size(), "cover": m._cover.size()}
+	m.free()
+	return data
+
+func _next_raid(map_seed := -1) -> void:
+	chosen_seed = map_seed
 	show_start = false
 	get_tree().paused = false
 	get_tree().reload_current_scene.call_deferred()
@@ -629,6 +670,7 @@ func _place_extract() -> Area3D:
 	return area
 
 func _add_box(size: Vector3, pos: Vector3, color: Color) -> void:
+	blocks.append([size, pos, color])
 	if pos.y > 0.0:  # everything above the floor blocks walking
 		solids.append(Rect2(Vector2(pos.x - size.x / 2.0, pos.z - size.z / 2.0), Vector2(size.x, size.z)))
 	var body := StaticBody3D.new()

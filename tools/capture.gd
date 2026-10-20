@@ -47,6 +47,7 @@ func _init() -> void:
 	Main.show_start = false
 	Telemetry.enabled = false  # the tour is not real play: keep it out of the real logs
 	var main = load("res://main.tscn").instantiate()
+	main.profile_path = "user://capture_profile.json"  # never the real save
 	main.seed_override = map_seed
 	root.add_child(main)
 	await process_frame

@@ -38,6 +38,8 @@ var seed_value := 0  # map seed, only logged; main may set it
 var map_info := {}  # the starting map as data, set by main; logged on the first line of the raid's log
 var shots := 0  # shots fired this raid
 var ammo_spent := 0
+var damage_mult := {}  # weapon id -> damage multiplier from the profile's weapon upgrades
+var reload_seconds: float = Tuning.RELOAD_SECONDS  # shortened by the Weapon handling attribute
 var loaded := {}  # weapon id -> rounds in its magazine; the backpack holds the rest
 var reload_weapon := ""  # weapon being reloaded, "" if none
 var reload_left := 0.0
@@ -87,7 +89,7 @@ func loaded_rounds(weapon_id: String) -> int:
 func shown_rounds(weapon_id: String) -> int:
 	if reload_weapon != weapon_id:
 		return loaded_rounds(weapon_id)
-	var progress := 1.0 - reload_left / Tuning.RELOAD_SECONDS
+	var progress := 1.0 - reload_left / reload_seconds
 	return int(lerpf(loaded_rounds(weapon_id), _reload_target(weapon_id), progress))
 
 func _reload_target(weapon_id: String) -> int:
@@ -101,7 +103,7 @@ func request_reload() -> bool:
 	if state != State.ACTIVE or reload_weapon != "" or _reload_target(id) <= loaded_rounds(id):
 		return false
 	reload_weapon = id
-	reload_left = Tuning.RELOAD_SECONDS
+	reload_left = reload_seconds
 	reload_started.emit(id)
 	return true
 
@@ -140,7 +142,7 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		query.exclude = [_player.get_rid()]
 		var hit: Dictionary = space.intersect_ray(query)
 		if hit and hit["collider"].has_method("take_damage"):
-			var dmg := WeaponData.damage_at(w, aim.origin.distance_to(hit["position"]))
+			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0))))
 			hits += 1
 			total_dmg += dmg
 			var enemy = hit["collider"]
@@ -296,12 +298,14 @@ func _finish(outcome: String) -> void:
 	var items := _loot()
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
+	var points := 0  # attribute points earned (successful extracts only)
 	if outcome == "extracted" and profile != null:
 		profile.add_items(items)
+		points = profile.record_extract(_player.kills)
 		saved = profile.save()
 	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots,
 		"ammo_spent": ammo_spent, "duration": elapsed, "threat_reached": _threat_reached}
 	Telemetry.emit("raid.end.raid", end_info)
 	Telemetry.finish()
 	Telemetry.record_run(end_info)
-	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills})
+	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points})

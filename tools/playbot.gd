@@ -36,6 +36,7 @@ func _init() -> void:
 	var max_seconds := float(args[1]) if args.size() > 1 else 240.0
 	Main.show_start = false
 	main = load("res://main.tscn").instantiate()
+	main.profile_path = "user://playbot_profile.json"  # never the real save: a bot raid would bank loot and points into it
 	main.seed_override = map_seed
 	root.add_child(main)
 	await process_frame

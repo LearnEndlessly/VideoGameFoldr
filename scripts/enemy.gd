@@ -38,6 +38,14 @@ var _bar := Node3D.new()        # faces the camera each frame
 var _bar_fill: MeshInstance3D
 var _bar_width := 1.0
 
+# An enemy that never entered the scene tree (the base's map preview builds maps off-tree) never parented
+# its label and bar; free them with it.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		for n in [_label, _bar]:
+			if is_instance_valid(n) and n.get_parent() == null:
+				n.free()
+
 func _ready() -> void:
 	add_to_group("pack_%d" % group_id)
 	add_to_group("enemy")

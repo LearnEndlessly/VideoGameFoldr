@@ -25,6 +25,13 @@ if ($Tests.Count -eq 0) {
 $logDir = Join-Path $env:APPDATA "Godot\app_userdata\VideoGame Beta\telemetry"
 function Count-Logs { if (Test-Path $logDir) { (Get-ChildItem $logDir -File | Measure-Object).Count } else { 0 } }
 $logsBefore = Count-Logs
+# Same for the real save: tests that start a raid without naming a profile get a scratch one (VG_PROFILE),
+# and the real profile must come out byte for byte as it went in.
+$userDir = Join-Path $env:APPDATA "Godot\app_userdata\VideoGame Beta"
+$realProfile = Join-Path $userDir "profile.json"
+function Profile-Hash { if (Test-Path $realProfile) { (Get-FileHash $realProfile).Hash } else { "none" } }
+$profileBefore = Profile-Hash
+$env:VG_PROFILE = "user://test_run_profile.json"
 
 # Noise that is expected: leaks at exit, backtraces, and profile_unit's deliberate corrupt-file case.
 $noise = 'leaked|ObjectDB|^\s*$|at: cleanup|current_scene|reload_current|Parse JSON failed|GDScript backtrace|^\s+\[\d+\]|^\s+at:|WARNING: Profile at'
@@ -34,6 +41,7 @@ foreach ($name in $Tests) {
 	$log = Join-Path $env:TEMP "gt_$name.log"
 	$err = Join-Path $env:TEMP "gt_$name.err"
 	Remove-Item $log, $err -ErrorAction SilentlyContinue
+	Remove-Item (Join-Path $userDir "test_run_profile.json*") -ErrorAction SilentlyContinue  # every test starts from an empty profile
 	# The embedded quotes matter: the project path has spaces and Godot otherwise reports
 	# "Invalid project path" and tests nothing.
 	$args = @('--headless', '--path', "`"$project`"", '-s', "tests/$name.gd")
@@ -56,6 +64,8 @@ foreach ($r in ($results | Where-Object { $_.Result -eq "FAIL" })) {
 }
 $logsAfter = Count-Logs
 if ($logsAfter -ne $logsBefore) { Write-Output "`nWARNING: real telemetry folder changed ($logsBefore -> $logsAfter files); a test wrote to it." }
+if ((Profile-Hash) -ne $profileBefore) { Write-Output "`
+WARNING: the real profile.json changed; a test wrote to it." }
 $failed = @($results | Where-Object { $_.Result -eq "FAIL" }).Count
 Write-Output ""
 Write-Output ("{0} passed, {1} failed." -f ($results.Count - $failed), $failed)

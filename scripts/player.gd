@@ -11,11 +11,16 @@ const Telemetry = preload("res://scripts/telemetry.gd")
 
 signal died
 signal inventory_toggled(open: bool)
+signal station_used(station: Node)  # base only: E or a click on a station
+signal ui_closed  # base only: Esc while a station panel is open
 
 const MAX_HEALTH := 100
 const SENS := 0.002
 
 var health := MAX_HEALTH
+var max_health := MAX_HEALTH  # raised by the Constitution attribute (apply_profile)
+var armor := 0.0  # fraction of every hit absorbed
+var speed_mult := 1.0
 var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
@@ -60,8 +65,8 @@ func use_slot(i: int) -> void:
 	if _try_craft(id):
 		return
 	var heal: int = Loot.ITEMS[id].get("heal", 0)
-	if heal > 0 and health < MAX_HEALTH:
-		health = mini(health + heal, MAX_HEALTH)
+	if heal > 0 and health < max_health:
+		health = mini(health + heal, max_health)
 		inventory.take_one(i)
 		Sfx.play("heal")
 		Telemetry.emit("player.use.item", {"id": id, "outcome": "ok"})
@@ -77,7 +82,7 @@ func _try_craft(id: String) -> bool:
 	return false
 
 func take_damage(amount: int) -> void:
-	health -= amount
+	health -= maxi(1, int(round(amount * (1.0 - armor))))
 	Sfx.play("hurt")
 	if health <= 0:
 		died.emit()
@@ -87,11 +92,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_y(-event.relative.x * SENS)
 		_head.rotation.x = clampf(_head.rotation.x - event.relative.y * SENS, -1.5, 1.5)
 	elif event is InputEventMouseButton and event.pressed and not inventory_open:
+		var was_captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED  # the click that grabs the mouse is not a shot
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if raid == null and was_captured and event.button_index == MOUSE_BUTTON_LEFT:
+			_hub_shoot()
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		elif event.keycode == KEY_TAB:
+			if raid == null and inventory_open:  # in the base: close the open station panel
+				inventory_open = false
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				ui_closed.emit()
+			else:
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		elif event.keycode == KEY_TAB and raid != null:
 			inventory_open = not inventory_open
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_open else Input.MOUSE_MODE_CAPTURED
 			inventory_toggled.emit(inventory_open)
@@ -108,6 +121,29 @@ func _unhandled_input(event: InputEvent) -> void:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
 				raid.request_loot(hit["collider"])
+			elif raid == null:
+				_use_station()
+
+# In the base: use the station or button (bodies in group "station" or "shootable") the player is
+# looking at, within `dist` metres. E reaches 3 m; a shot reaches the weapon's range.
+func _use_station(dist := 3.0) -> void:
+	var hit := _cast(dist)
+	if hit and (hit["collider"].is_in_group("station") or hit["collider"].is_in_group("shootable")):
+		station_used.emit(hit["collider"])
+
+# In the base a click fires the weapon: it makes the sound, uses no ammo (the stash and backpack are
+# untouched), and whatever it hits that can be used is used, so buttons can be shot from across the room.
+func _hub_shoot() -> void:
+	Sfx.play(weapon["sound"])
+	_use_station(float(weapon["max"]))
+
+# Carry the profile's upgrades into a raid: attributes, and the weapon held at the start.
+func apply_profile(profile) -> void:
+	max_health = profile.max_health(MAX_HEALTH)
+	health = max_health
+	armor = profile.armor()
+	speed_mult = profile.speed_mult()
+	select_weapon(profile.equipped)
 
 func _physics_process(delta: float) -> void:
 	var dir := Vector3.ZERO
@@ -116,7 +152,7 @@ func _physics_process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_A): dir -= transform.basis.x
 	if Input.is_physical_key_pressed(KEY_D): dir += transform.basis.x
 	var run := Input.is_physical_key_pressed(KEY_SHIFT)
-	var speed: float = Tuning.PLAYER_SPRINT_SPEED if run else Tuning.PLAYER_WALK_SPEED
+	var speed: float = (Tuning.PLAYER_SPRINT_SPEED if run else Tuning.PLAYER_WALK_SPEED) * speed_mult
 	dir = dir.normalized() * speed
 	sprinting = run and dir.length() > 0.1  # enemies can hear this (see enemy.gd)
 	velocity.x = dir.x
@@ -177,7 +213,7 @@ func _cast_dir(dir: Vector3, dist: float) -> Dictionary:
 # Aim line, one colour by where it lands: green = full damage, orange = in the falloff band,
 # grey = nothing within the weapon's max range. The dot at the hit point matches.
 func _update_aim() -> void:
-	var on := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var on := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and raid != null  # no laser in the base
 	var from := _cam.global_position
 	var dir := -_cam.global_transform.basis.z
 	var hit := _cast_dir(dir, weapon["max"])

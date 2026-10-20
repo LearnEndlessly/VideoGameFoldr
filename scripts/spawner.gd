@@ -21,6 +21,11 @@ var _beam: MeshInstance3D
 
 const BEAM_RADIUS := 2.0
 
+# Same as enemy.gd: an off-tree base (the map preview) never parented its label.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and is_instance_valid(_label) and _label.get_parent() == null:
+		_label.free()
+
 func _ready() -> void:
 	_rng.seed = rng_seed
 	_clock = _rng.randf() * Tuning.SPAWNER_INTERVAL * 0.5  # bases do not all pulse in step
