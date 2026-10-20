@@ -286,12 +286,21 @@ func _spawn_pickup(id: String, qty: int, pos: Vector3) -> void:
 func xp_needed() -> int:
 	return Upgrades.RAID_XP_BASE + Upgrades.RAID_XP_GROWTH * (raid_level() - 1)
 
-# Adds experience; each full level earns a pick.
+# Upgrade levels still to win: what is left below every upgrade's max, minus the picks already waiting.
+func levels_left() -> int:
+	var left := 0
+	for id in Upgrades.RAID_UPGRADES:
+		left += int(Upgrades.RAID_UPGRADES[id]["max"]) - _lvl(id)
+	return left - picks_pending
+
+# Adds experience; each full level earns a pick, but only while there is an upgrade left to take (with everything
+# maxed the bar just stays full, and no empty level-up screen can appear).
 func add_xp(amount: int) -> void:
 	xp += amount
-	while xp >= xp_needed():
+	while xp >= xp_needed() and levels_left() > 0:
 		xp -= xp_needed()
 		picks_pending += 1
+	xp = mini(xp, xp_needed())
 
 # The player walked into an XP orb.
 func collect_xp(orb) -> bool:

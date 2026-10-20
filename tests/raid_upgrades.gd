@@ -92,6 +92,25 @@ func _run() -> void:
 	_check(not raid.choose_upgrade("firerate"), "an upgrade at its max cannot be taken again")
 	_check(not raid.pick_choices().has("firerate"), "a maxed upgrade is not offered")
 
+	# With every upgrade maxed there is nothing to pick: no levels, no level-up screen, no pause.
+	var all_max := {}
+	for id in Upgrades.RAID_UPGRADES:
+		all_max[id] = Upgrades.RAID_UPGRADES[id]["max"]
+	var saved_up: Dictionary = raid.upgrades.duplicate()
+	var saved_pending: int = raid.picks_pending
+	raid.picks_pending = 0
+	raid.upgrades = all_max
+	raid.add_xp(10000)
+	_check(raid.picks_pending == 0 and raid.pick_choices().is_empty() and raid.levels_left() == 0, "a maxed build should earn no more picks")
+	_check(raid.xp_fraction() <= 1.0, "the bar should not run past full")
+	raid.picks_pending = 1  # even a stray pending pick must not freeze the game
+	await process_frame
+	await process_frame
+	_check(not paused and main._pick_layer == null and raid.picks_pending == 0, "an empty pick must be dropped, not shown")
+	raid.upgrades = saved_up
+	raid.picks_pending = saved_pending
+	raid.xp = 0
+
 	# A pending pick pauses the game and opens the level-up screen; taking one resumes.
 	raid.picks_pending = 1
 	await process_frame

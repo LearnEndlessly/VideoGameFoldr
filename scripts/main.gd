@@ -387,7 +387,10 @@ func _process(_d: float) -> void:
 	if raid == null:
 		return
 	if raid.picks_pending > 0 and _pick_layer == null and raid.state == raid.State.ACTIVE:
-		_open_pick()
+		if raid.pick_choices().is_empty():  # nothing left to offer: never show an empty level-up screen
+			raid.picks_pending = 0
+		else:
+			_open_pick()
 	_banner_time = maxf(_banner_time - _d, 0.0)
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
