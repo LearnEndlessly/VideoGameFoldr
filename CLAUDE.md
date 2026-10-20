@@ -1,6 +1,6 @@
 # VideoGameFoldr (Godot 4.7.2 extraction FPS)
 
-Read README.md "Architecture" and "Tests" only when the task needs them; it is long.
+Read README.md (brief, architecture, tests); current state and phase notes are in docs/STATE.md. Open them only when the task needs them.
 
 ## Map
 - `scripts/main.gd`: scene root; builds the raid, HUD and map in code (map generation is the `_place_*`/`_add_*` block at the bottom).
