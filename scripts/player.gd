@@ -17,6 +17,8 @@ signal pause_requested  # raid only: Esc
 
 const MAX_HEALTH := 100
 const SENS := 0.002
+const BASE_FOV := 75.0
+const ZOOM_FOV_SPEED := 500.0  # degrees per second the field of view moves toward its target
 
 var health := MAX_HEALTH
 var max_health := MAX_HEALTH  # raised by the Constitution attribute (apply_profile)
@@ -30,6 +32,10 @@ var _key_reload := false  # the current reload was started by holding R
 var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
 var weapon_id := "pistol"
+var loadout: Array = []  # the weapons taken into the raid (the profile's equipped one); empty = any (the base)
+var zooming := false  # right mouse held in a raid
+var zoom_input_test := false  # tests hold the zoom button with this: a headless run has no captured mouse
+var scoped := false  # zoomed in far enough with a scoped weapon: main shows the scope overlay
 var weapon: Dictionary = WeaponData.DATA["pistol"]
 var _viewmodel: Node3D  # the current weapon's art model, if it has one
 var _step_dist := 0.0  # metres walked since the last footstep sound
@@ -91,8 +97,9 @@ func take_damage(amount: int) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		rotate_y(-event.relative.x * SENS)
-		_head.rotation.x = clampf(_head.rotation.x - event.relative.y * SENS, -1.5, 1.5)
+		var sens := SENS * _cam.fov / BASE_FOV  # slower when zoomed in
+		rotate_y(-event.relative.x * sens)
+		_head.rotation.x = clampf(_head.rotation.x - event.relative.y * sens, -1.5, 1.5)
 	elif event is InputEventMouseButton and event.pressed and not inventory_open:
 		var was_captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED  # the click that grabs the mouse is not a shot
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -112,12 +119,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			inventory_open = not inventory_open
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory_open else Input.MOUSE_MODE_CAPTURED
 			inventory_toggled.emit(inventory_open)
-		elif event.keycode == KEY_1:
-			select_weapon("pistol")
-			Sfx.play("switch")
-		elif event.keycode == KEY_2:
-			select_weapon("scattergun")
-			Sfx.play("switch")
+		elif event.keycode >= KEY_1 and event.keycode <= KEY_3:
+			var pool: Array = loadout if not loadout.is_empty() else WeaponData.DATA.keys()
+			var i: int = event.keycode - KEY_1
+			if i < pool.size() and pool[i] != weapon_id:
+				select_weapon(pool[i])
+				Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
@@ -144,6 +151,7 @@ func apply_profile(profile) -> void:
 	health = max_health
 	armor = profile.armor()
 	speed_mult = profile.speed_mult()
+	loadout = [profile.equipped]
 	select_weapon(profile.equipped)
 
 func _physics_process(delta: float) -> void:
@@ -182,8 +190,20 @@ func _physics_process(delta: float) -> void:
 		raid.request_fire(weapon_id, _cam.global_transform)  # the raid checks cooldown and ammo
 
 # The aim line follows the camera, so it updates every rendered frame (physics ticks lag the mouse).
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_zoom(delta)
 	_update_aim()
+
+# Holding the right mouse button in a raid zooms to the weapon's zoom_fov; a scoped weapon shows the scope once
+# it is most of the way in.
+func _update_zoom(delta: float) -> void:
+	zooming = raid != null and not inventory_open and (zoom_input_test or (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+		and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)))
+	var target: float = float(weapon.get("zoom_fov", BASE_FOV)) if zooming else BASE_FOV
+	_cam.fov = move_toward(_cam.fov, target, ZOOM_FOV_SPEED * delta)
+	scoped = zooming and bool(weapon.get("scope", false)) and _cam.fov < BASE_FOV * 0.5
+	if _viewmodel != null:
+		_viewmodel.visible = not scoped
 
 func select_weapon(id: String) -> void:
 	weapon_id = id
@@ -222,7 +242,7 @@ func _cast_dir(dir: Vector3, dist: float) -> Dictionary:
 # Aim line, one colour by where it lands: green = full damage, orange = in the falloff band,
 # grey = nothing within the weapon's max range. The dot at the hit point matches.
 func _update_aim() -> void:
-	var on := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and raid != null  # no laser in the base
+	var on := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and raid != null and not scoped  # no laser in the base or through a scope
 	var from := _cam.global_position
 	var dir := -_cam.global_transform.basis.z
 	var hit := _cast_dir(dir, weapon["max"])

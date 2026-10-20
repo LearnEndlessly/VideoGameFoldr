@@ -6,7 +6,7 @@
 #   pool: item id -> relative chance (ids come from data/loot.gd)
 const DATA := {
 	"armory": {
-		"name": "ARMORY", "style": "armory", "height": 4.6, "size": 5.0, "door": 2.0, "crates": [2, 3], "rolls": [2, 3], "qty_mult": 1.0,
+		"name": "AMMO DEPOT", "style": "armory", "height": 4.6, "size": 5.0, "door": 2.0, "crates": [2, 3], "rolls": [2, 3], "qty_mult": 1.0,
 		"pool": {"ammo": 70, "repair_kit": 0},
 		"wall_color": Color(0.34, 0.38, 0.27), "crate_color": Color(0.95, 0.75, 0.2),
 		"trim_color": Color(0.95, 0.75, 0.1), "roof_color": Color(0.2, 0.22, 0.18),

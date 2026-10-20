@@ -6,13 +6,15 @@ extends Control
 var spread := 0.0  # weapon's cone half-angle in radians
 var fov := 75.0  # camera vertical field of view, degrees
 var _drawn := -1.0
+var _drawn_fov := -1.0
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # a HUD drawing must never eat clicks meant for the backpack
 
 func _process(_d: float) -> void:
-	if spread != _drawn:
+	if spread != _drawn or fov != _drawn_fov:  # the circle changes size as the camera zooms
 		_drawn = spread
+		_drawn_fov = fov
 		queue_redraw()
 
 func _draw() -> void:

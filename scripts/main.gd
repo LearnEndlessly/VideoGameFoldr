@@ -22,6 +22,7 @@ const DirectionTick = preload("res://scripts/direction_tick.gd")
 const Hub = preload("res://scripts/hub.gd")
 const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const PauseMenu = preload("res://scripts/pause_menu.gd")
+const Scope = preload("res://scripts/scope.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
 const EXTRACT_ZONES := {
@@ -87,6 +88,7 @@ var _banner_time := 0.0
 var _pick_layer: CanvasLayer  # the level-up screen while it is open
 var _pause_layer: CanvasLayer  # the pause menu while it is open
 var _xp_bar: ProgressBar
+var _scope: Control  # the sniper scope overlay
 var _hp_bar: ProgressBar
 var _stats_label: Label
 var _ammo_bar: Control
@@ -218,6 +220,10 @@ func _build_raid() -> void:
 		z["area"].body_exited.connect(_on_zone_body.bind(false, z["id"]))
 
 	var layer := CanvasLayer.new()
+	_scope = Scope.new()
+	_scope.visible = false
+	layer.add_child(_scope)
+	_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hud = Label.new()
 	_hud.position = Vector2(16, 16)
 	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # a narrow left column, clear of the extract bar in the middle
@@ -360,6 +366,9 @@ func _update_status_hud() -> void:
 	_ammo_bar.total = w["clip"]
 	_ammo_bar.filled = shown
 	_cross.spread = w["spread"]
+	_cross.fov = _player._cam.fov
+	_cross.visible = not _player.scoped
+	_scope.shown = _player.scoped
 	_reload_tip.visible = shown * 5 <= int(w["clip"]) and held > shown and raid.reload_weapon != id
 	var note := ""
 	if raid.reload_weapon == id:
@@ -379,7 +388,7 @@ func _process(_d: float) -> void:
 	_update_status_hud()
 	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status()]
 	_update_threat_hud()
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold R to reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold RMB to zoom, hold R to reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
 		z["beam"].visible = shown

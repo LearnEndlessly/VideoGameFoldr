@@ -122,6 +122,15 @@ func _init() -> void:
 	await _frames(3)
 	await _shot("09_aim_and_healthbar")
 
+	# The sniper rifle through its scope, and a zoomed pistol.
+	player.select_weapon("sniper")
+	player.zoom_input_test = true
+	await _frames(20)
+	await _shot("12_scope")
+	player.zoom_input_test = false
+	player.select_weapon("pistol")
+	await _frames(20)
+
 	# Extract countdown, then the threat warning.
 	player.global_position = main.extract_pos + Vector3(0, 0.05, 0)
 	await _frames(100)

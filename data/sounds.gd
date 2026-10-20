@@ -8,6 +8,7 @@
 const DATA := {
 	"shoot_pistol": {"freq": 600.0, "freq_end": 120.0, "duration": 0.14, "noise": 0.5, "wave": "sine", "decay": 3.0, "volume": 0.5, "min_gap": 0.05},
 	"shoot_scatter": {"freq": 300.0, "freq_end": 60.0, "duration": 0.3, "noise": 0.85, "wave": "sine", "decay": 2.5, "volume": 0.7, "min_gap": 0.05},
+	"shoot_sniper": {"freq": 900.0, "freq_end": 70.0, "duration": 0.45, "noise": 0.6, "wave": "sine", "decay": 2.2, "volume": 0.75, "min_gap": 0.05},
 	"empty": {"freq": 1400.0, "freq_end": 900.0, "duration": 0.04, "noise": 0.2, "wave": "square", "decay": 2.0, "volume": 0.3, "min_gap": 0.15},
 	"threat": {"freq": 440.0, "freq_end": 880.0, "duration": 0.7, "noise": 0.0, "wave": "square", "decay": 1.0, "volume": 0.5, "min_gap": 1.0},
 	"switch": {"freq": 300.0, "freq_end": 450.0, "duration": 0.06, "noise": 0.3, "wave": "sine", "decay": 2.0, "volume": 0.3, "min_gap": 0.05},

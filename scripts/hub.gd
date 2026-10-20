@@ -2,7 +2,7 @@ extends Node3D
 # The base of operations: a closed, enemy-free room the player returns to after every raid. A station in the middle of each wall and a map pit in the floor at the centre, each opened with E (or a click)
 # while looking at it:
 #   STASH       the loot kept from raids
-#   ARMORY      choose the starting weapon and upgrade weapons with stash loot
+#   AMMO DEPOT  choose the starting weapon (the only weapon taken into a raid)
 #   CHARACTER   spend attribute points (speed, constitution, weapon handling)
 #   MAP PIT     a miniature of the next raid's map seen from above through a glass cover; panels hovering
 #               over it (shoot them) change the map number
@@ -32,12 +32,12 @@ const PIT_MAP := Vector2(2.2, 1.6)  # the part of the pit floor the miniature ma
 const STATIONS := {
 	"raid": {"panel_only": true, "name": "RAID TERMINAL", "pos": Vector3(0, 0, -HALF_D + 1.0), "size": Vector3(3.0, 1.6, 0.8), "color": Color(0.2, 0.8, 0.3)},
 	"stash": {"name": "STASH", "pos": Vector3(0, 0, HALF_D - 1.0), "size": Vector3(2.6, 1.2, 1.0), "color": Color(0.35, 0.45, 0.75)},
-	"armory": {"name": "ARMORY", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
+	"armory": {"name": "AMMO DEPOT", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
 	"map": {"name": "MAP", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
 }
 const STATION_TAGLINES := {
-	"raid": "pick your risk and deploy", "stash": "what you brought home", "armory": "choose and sharpen your weapon",
+	"raid": "pick your risk and deploy", "stash": "what you brought home", "armory": "choose your starting weapon",
 	"character": "train your operator", "map": "choose the next battlefield",
 }
 # Panels hovering over the map pit, in view while looking at the map: shoot them (or press E close up) to change the map.
@@ -564,7 +564,7 @@ func _fill_stash() -> void:
 
 func _fill_armory() -> void:
 	var a := _accent()
-	_label("Pick the weapon you start raids with. Weapon and character upgrades are won during a raid and are lost when it ends.", 13, UIKit.DIM)
+	_label("Pick the one weapon you take into raids. Weapon and character upgrades are won during a raid and are lost when it ends.", 13, UIKit.DIM)
 	var most := {"damage": 1.0, "clip": 1.0, "range": 1.0}  # the best of each stat, so the meters compare weapons
 	for id in WeaponData.DATA:
 		var w: Dictionary = WeaponData.DATA[id]
