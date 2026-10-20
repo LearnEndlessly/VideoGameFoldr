@@ -246,16 +246,20 @@ func _lvl(id: String) -> int:
 # Recomputes the player's numbers from the base values, the raid upgrades and the active powerups.
 func _apply_upgrades() -> void:
 	var up: Dictionary = Upgrades.RAID_UPGRADES
-	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * _lvl("damage")) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
-	cooldown_mult = 1.0 - float(up["firerate"]["per_level"]) * _lvl("firerate")
-	reload_seconds = float(_base["reload"]) * (1.0 - float(up["hands"]["per_level"]) * _lvl("hands")) * float(_att(_player.weapon_id).get("reload", 1.0))
-	_player.max_health = int(_base["hp"]) + int(up["vitality"]["hp"]) * _lvl("vitality")
+	var t := {}  # each upgrade's levels counted in full levels (every 3 levels the next ones add less)
+	for id in up:
+		t[id] = Upgrades.total(_lvl(id))
+	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * t["damage"]) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
+	cooldown_mult = maxf(1.0 - float(up["firerate"]["per_level"]) * t["firerate"], 0.25)
+	reload_seconds = float(_base["reload"]) * maxf(1.0 - float(up["hands"]["per_level"]) * t["hands"], 0.25) * float(_att(_player.weapon_id).get("reload", 1.0))
+	_player.max_health = int(_base["hp"]) + int(round(float(up["vitality"]["hp"]) * t["vitality"]))
 	_player.health = mini(_player.health, _player.max_health)
-	var armor := minf(float(_base["armor"]) + float(up["plating"]["per_level"]) * _lvl("plating"), 0.8)
+	var armor := minf(float(_base["armor"]) + float(up["plating"]["per_level"]) * t["plating"], 0.8)
 	if powerups.has("shield"):
 		armor = 1.0 - (1.0 - armor) * float(Powerups.DATA["shield"]["taken"])
 	_player.armor = armor
-	_player.speed_mult = (float(_base["speed"]) + float(up["sprint"]["per_level"]) * _lvl("sprint")) * (float(Powerups.DATA["haste"]["mult"]) if powerups.has("haste") else 1.0)
+	_player.speed_mult = (float(_base["speed"]) + float(up["sprint"]["per_level"]) * t["sprint"]) * (float(Powerups.DATA["haste"]["mult"]) if powerups.has("haste") else 1.0)
+	_player.gravity_mult = maxf(1.0 - float(up["jump"]["per_level"]) * t["jump"], 0.3)  # lower gravity, higher jumps
 
 # A kill leaves one XP orb per point of the enemy's difficulty, and may drop scrap, an attachment or a powerup.
 func _on_kill(pos: Vector3, stats := {}) -> void:
@@ -286,21 +290,12 @@ func _spawn_pickup(id: String, qty: int, pos: Vector3) -> void:
 func xp_needed() -> int:
 	return Upgrades.RAID_XP_BASE + Upgrades.RAID_XP_GROWTH * (raid_level() - 1)
 
-# Upgrade levels still to win: what is left below every upgrade's max, minus the picks already waiting.
-func levels_left() -> int:
-	var left := 0
-	for id in Upgrades.RAID_UPGRADES:
-		left += int(Upgrades.RAID_UPGRADES[id]["max"]) - _lvl(id)
-	return left - picks_pending
-
-# Adds experience; each full level earns a pick, but only while there is an upgrade left to take (with everything
-# maxed the bar just stays full, and no empty level-up screen can appear).
+# Adds experience; each full level earns a pick.
 func add_xp(amount: int) -> void:
 	xp += amount
-	while xp >= xp_needed() and levels_left() > 0:
+	while xp >= xp_needed():
 		xp -= xp_needed()
 		picks_pending += 1
-	xp = mini(xp, xp_needed())
 
 # The player walked into an XP orb.
 func collect_xp(orb) -> bool:
@@ -310,21 +305,21 @@ func collect_xp(orb) -> bool:
 	orb.queue_free()
 	return true
 
-# Up to RAID_PICK_CHOICES random upgrades that are not at their max level yet.
+# RAID_PICK_CHOICES random upgrades (there is no top level, so there is always something to offer).
 func pick_choices() -> Array:
-	var open: Array = Upgrades.RAID_UPGRADES.keys().filter(func(id): return _lvl(id) < int(Upgrades.RAID_UPGRADES[id]["max"]))
+	var open: Array = Upgrades.RAID_UPGRADES.keys()
 	open.shuffle()
 	return open.slice(0, Upgrades.RAID_PICK_CHOICES)
 
-# Spends a pending level-up on upgrade `id`. False (nothing changes) with none pending or the upgrade at its max.
+# Spends a pending level-up on upgrade `id`. False (nothing changes) with none pending.
 func choose_upgrade(id: String) -> bool:
-	if state != State.ACTIVE or picks_pending <= 0 or not Upgrades.RAID_UPGRADES.has(id) or _lvl(id) >= int(Upgrades.RAID_UPGRADES[id]["max"]):
+	if state != State.ACTIVE or picks_pending <= 0 or not Upgrades.RAID_UPGRADES.has(id):
 		return false
 	picks_pending -= 1
 	upgrades[id] = _lvl(id) + 1
 	_apply_upgrades()
 	if id == "vitality":
-		_player.health = mini(_player.health + int(Upgrades.RAID_UPGRADES[id]["hp"]), _player.max_health)
+		_player.health = mini(_player.health + int(round(float(Upgrades.RAID_UPGRADES[id]["hp"]) * Upgrades.step_factor(_lvl(id) - 1))), _player.max_health)
 	Telemetry.emit("player.pick.upgrade", {"id": id, "level": _lvl(id)})
 	return true
 

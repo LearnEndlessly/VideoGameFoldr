@@ -103,8 +103,8 @@ const GUARD_DISTANCE := 8.0
 # Leaving a zone resets its timer. Distances along the ground ("path") are walking distance from the
 # player's start around walls and cover, measured on a 1 m grid (4-connected, so slightly more than a
 # straight line on diagonals). Separations are straight-line metres.
-const EXTRACT_HOLD_SECONDS := 8.0
-const EXTRACT_B_HOLD_SECONDS := 12.0
+const EXTRACT_HOLD_SECONDS := 3.0  # was 8; the fast route stays 1.5x as long
+const EXTRACT_B_HOLD_SECONDS := 4.5
 const EXTRACT_B_NOISE_RADIUS := 30.0
 const EXTRACT_A_MIN_PATH := 32.0  # A is at least this far (path) from the start
 const EXTRACT_B_MIN_PATH := 8.0  # B is between these two path distances from the start

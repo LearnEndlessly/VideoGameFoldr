@@ -25,6 +25,7 @@ var health := MAX_HEALTH
 var max_health := MAX_HEALTH  # raised by the Constitution attribute (apply_profile)
 var armor := 0.0  # fraction of every hit absorbed
 var speed_mult := 1.0
+var gravity_mult := 1.0  # the Moon boots upgrade lowers it
 var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
@@ -177,7 +178,7 @@ func _physics_process(delta: float) -> void:
 	if is_on_floor():
 		if Input.is_physical_key_pressed(KEY_SPACE): velocity.y = Tuning.PLAYER_JUMP_SPEED
 	else:
-		velocity.y -= 20.0 * delta
+		velocity.y -= 20.0 * gravity_mult * delta
 	move_and_slide()
 	if is_on_floor():
 		_step_dist += Vector2(velocity.x, velocity.z).length() * delta

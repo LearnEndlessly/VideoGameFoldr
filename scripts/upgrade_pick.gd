@@ -54,7 +54,8 @@ func show_choices(choices: Array, levels: Dictionary, on_pick: Callable) -> void
 		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		desc.custom_minimum_size = Vector2(0, 60)
 		v.add_child(desc)
-		v.add_child(UIKit.pips(level + 1, int(u["max"]), accent))
+		v.add_child(UIKit.label("LEVEL %d  >  %d" % [level, level + 1], 14, accent, true))
+		v.add_child(UIKit.label("THIS LEVEL  %s" % Upgrades.next_text(id, level), 16, UIKit.TEXT, true))
 		var b := Button.new()
 		b.text = "[%d]  TAKE" % (i + 1)
 		b.custom_minimum_size = Vector2(0, 48)

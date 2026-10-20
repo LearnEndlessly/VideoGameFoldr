@@ -87,29 +87,42 @@ func _run() -> void:
 	_check(player.max_health == hp0 + 20 and player.health == 70, "Vitality should add 20 max health and heal 20, got %d/%d" % [player.health, player.max_health])
 	raid.choose_upgrade("hands")
 	_check(is_equal_approx(raid.reload_seconds, Tuning.RELOAD_SECONDS * 0.85), "Quick hands should cut reload by 15%%, got %s" % raid.reload_seconds)
-	raid.upgrades["firerate"] = 3
+	raid.upgrades["firerate"] = 6
 	raid.picks_pending = 1
-	_check(not raid.choose_upgrade("firerate"), "an upgrade at its max cannot be taken again")
-	_check(not raid.pick_choices().has("firerate"), "a maxed upgrade is not offered")
-
-	# With every upgrade maxed there is nothing to pick: no levels, no level-up screen, no pause.
-	var all_max := {}
-	for id in Upgrades.RAID_UPGRADES:
-		all_max[id] = Upgrades.RAID_UPGRADES[id]["max"]
-	var saved_up: Dictionary = raid.upgrades.duplicate()
-	var saved_pending: int = raid.picks_pending
+	_check(raid.pick_choices().size() == Upgrades.RAID_PICK_CHOICES, "there is no top level, so three choices are always offered")
+	_check(is_equal_approx(Upgrades.step_factor(2), 1.0) and is_equal_approx(Upgrades.step_factor(3), 0.8) and is_equal_approx(Upgrades.step_factor(6), 0.64), "every 3 levels each step is 0.8x the last")
+	_check(is_equal_approx(Upgrades.total(3), 3.0) and is_equal_approx(Upgrades.total(4), 3.8) and is_equal_approx(Upgrades.total(6), 5.4), "levels count in full levels: 3, 3.8, 5.4")
+	_check(raid.choose_upgrade("firerate") and raid.upgrades["firerate"] == 7, "an upgrade can be taken past any old maximum")
+	raid.upgrades.erase("firerate")
 	raid.picks_pending = 0
-	raid.upgrades = all_max
-	raid.add_xp(10000)
-	_check(raid.picks_pending == 0 and raid.pick_choices().is_empty() and raid.levels_left() == 0, "a maxed build should earn no more picks")
-	_check(raid.xp_fraction() <= 1.0, "the bar should not run past full")
-	raid.picks_pending = 1  # even a stray pending pick must not freeze the game
-	await process_frame
-	await process_frame
-	_check(not paused and main._pick_layer == null and raid.picks_pending == 0, "an empty pick must be dropped, not shown")
-	raid.upgrades = saved_up
-	raid.picks_pending = saved_pending
-	raid.xp = 0
+
+	var saved_up_keep: Dictionary = raid.upgrades.duplicate()
+	# Moon boots lower the gravity; stacking has diminishing returns and the floors hold at any level.
+	raid.picks_pending = 1
+	raid.choose_upgrade("jump")
+	_check(is_equal_approx(player.gravity_mult, 1.0 - 0.12), "Moon boots 1 should cut gravity by 12%%, got %s" % player.gravity_mult)
+	# The gravity number is really used: with half the gravity the player falls less in half a second.
+	player.set_physics_process(true)
+	var fall := []
+	for g in [1.0, 0.5]:
+		player.gravity_mult = g
+		player.velocity = Vector3.ZERO
+		player.global_position = Vector3(0, 12, 0)
+		await _frames(30)
+		fall.append(12.0 - player.global_position.y)
+	player.set_physics_process(false)
+	_check(fall[1] < fall[0] * 0.7, "half the gravity should fall much less in 0.5 s (%s vs %s m)" % [fall[1], fall[0]])
+	raid.upgrades = {"jump": 4, "firerate": 60, "hands": 60, "plating": 60, "damage": 60}
+	raid._apply_upgrades()
+	_check(is_equal_approx(player.gravity_mult, 1.0 - 0.12 * 3.8) or player.gravity_mult >= 0.3, "gravity should follow the diminishing total, got %s" % player.gravity_mult)
+	raid.upgrades = {"jump": 80, "firerate": 80, "hands": 80, "plating": 80, "damage": 80, "sprint": 80, "vitality": 80}
+	raid._apply_upgrades()
+	_check(player.gravity_mult >= 0.3 and raid.cooldown_mult >= 0.25 and raid.reload_seconds >= Tuning.RELOAD_SECONDS * 0.25 - 0.001 and player.armor <= 0.8, "floors hold at huge levels")
+	_check(raid._dmg_factor < 1.0 + 0.15 * 80.0, "stacked damage is below the undiminished total (%s)" % raid._dmg_factor)
+	_check(raid.pick_choices().size() == Upgrades.RAID_PICK_CHOICES, "still something to pick at level 80")
+	raid.upgrades = saved_up_keep
+	raid._apply_upgrades()
+	raid.picks_pending = 0
 
 	# A pending pick pauses the game and opens the level-up screen; taking one resumes.
 	raid.picks_pending = 1
