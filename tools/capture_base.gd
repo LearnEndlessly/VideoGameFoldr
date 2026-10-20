@@ -42,8 +42,10 @@ func _init() -> void:
 	hub.set_seed(5)
 	await _shot("b1_base")
 	for id in ["map", "stash", "armory", "character", "raid"]:
-		var station = get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == id)[0]
-		hub._on_station_used(station)
+		if id == "raid":
+			hub._map_button("play")
+		else:
+			hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == id)[0])
 		await _frames(3)
 		await _shot("b_%s" % id)
 		hub._close()

@@ -13,6 +13,7 @@ signal died
 signal inventory_toggled(open: bool)
 signal station_used(station: Node)  # base only: E or a click on a station
 signal ui_closed  # base only: Esc while a station panel is open
+signal pause_requested  # raid only: Esc
 
 const MAX_HEALTH := 100
 const SENS := 0.002
@@ -103,6 +104,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				inventory_open = false
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 				ui_closed.emit()
+			elif raid != null:
+				pause_requested.emit()
 			else:
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		elif event.keycode == KEY_TAB and raid != null:

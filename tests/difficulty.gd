@@ -145,7 +145,7 @@ func _run() -> void:
 	root.add_child(main)
 	await process_frame
 	var hub = main.get_children().filter(func(c): return "open_station" in c)[0]
-	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "raid")[0])
+	hub._map_button("play")
 	var buttons: Array = hub._content.find_children("*", "Button", true, false)
 	_check(buttons.size() == Difficulty.OPTIONS.size() * 3 + 1, "the terminal should have 3 buttons per option and START RAID, got %d" % buttons.size())
 	hub._set_difficulty("damage", 2)

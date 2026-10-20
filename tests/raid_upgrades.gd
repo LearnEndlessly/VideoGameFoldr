@@ -155,6 +155,21 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 
+	# The XP bar numbers, and the Esc pause menu.
+	main = await _raid()
+	raid = main.raid
+	_check(raid.raid_level() == 1 and is_equal_approx(raid.xp_fraction(), 0.0), "a fresh raid is level 1 with an empty bar")
+	raid._on_kill(Vector3(50, 0, 50))
+	_check(is_equal_approx(raid.xp_fraction(), 1.0 / Upgrades.RAID_KILLS_PER_PICK), "one kill fills part of the bar")
+	_check(main._xp_bar != null and main._xp_bar.get_parent() == main._hp_bar.get_parent(), "the XP bar sits with the health bar")
+	main._player.pause_requested.emit()
+	_check(paused and main._pause_layer != null, "Esc should pause the game behind the controls screen")
+	main._player.pause_requested.emit()  # a second request while paused changes nothing
+	main._resume()
+	_check(not paused and main._pause_layer == null, "resuming should unpause")
+	main.queue_free()
+	await process_frame
+
 	# Holding R reloads, letting go cancels.
 	main = await _raid()
 	raid = main.raid

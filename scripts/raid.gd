@@ -245,6 +245,16 @@ func collect_powerup(p) -> bool:
 	_apply_upgrades()
 	return true
 
+# The raid level (1 + the upgrades taken and waiting) and how far the kills are toward the next one (0..1), for the XP bar.
+func raid_level() -> int:
+	var taken := 0
+	for id in upgrades:
+		taken += int(upgrades[id])
+	return 1 + taken + picks_pending
+
+func xp_fraction() -> float:
+	return float(_kills_toward_pick) / float(Upgrades.RAID_KILLS_PER_PICK)
+
 # "OVERDRIVE 8s  HASTE 3s" for the HUD, "" with none active.
 func powerup_text() -> String:
 	var parts: Array = []

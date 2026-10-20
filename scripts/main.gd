@@ -21,6 +21,7 @@ const Spawner = preload("res://scripts/spawner.gd")
 const DirectionTick = preload("res://scripts/direction_tick.gd")
 const Hub = preload("res://scripts/hub.gd")
 const UpgradePick = preload("res://scripts/upgrade_pick.gd")
+const PauseMenu = preload("res://scripts/pause_menu.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 
 const EXTRACT_ZONES := {
@@ -84,6 +85,8 @@ var _threat_label: Label  # top right: the threat clock countdown, then "converg
 var _tick: Control  # arrow toward the nearest extract zone, after the threat clock fires
 var _banner_time := 0.0
 var _pick_layer: CanvasLayer  # the level-up screen while it is open
+var _pause_layer: CanvasLayer  # the pause menu while it is open
+var _xp_bar: ProgressBar
 var _hp_bar: ProgressBar
 var _stats_label: Label
 var _ammo_bar: Control
@@ -181,6 +184,7 @@ func _build_raid() -> void:
 
 	_player = Player.new()
 	add_child(_player)
+	_player.pause_requested.connect(_open_pause)
 	_player.apply_profile(profile)  # the base's upgrades: attributes and the starting weapon
 	raid = Raid.new()
 	raid.profile = profile
@@ -215,7 +219,7 @@ func _build_raid() -> void:
 
 	var layer := CanvasLayer.new()
 	_hud = Label.new()
-	_hud.position = Vector2(16, 62)
+	_hud.position = Vector2(16, 16)
 	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # a narrow left column, clear of the extract bar in the middle
 	_hud.custom_minimum_size = Vector2(420, 0)
 	_help = Label.new()  # controls hint along the bottom edge, wrapped so it never runs off screen
@@ -229,7 +233,7 @@ func _build_raid() -> void:
 	_help.offset_bottom = -12
 	layer.add_child(_hud)
 	_feed = VBoxContainer.new()
-	_feed.position = Vector2(16, 170)
+	_feed.position = Vector2(16, 110)
 	layer.add_child(_feed)
 	var ui := InventoryUI.new()
 	layer.add_child(ui)
@@ -293,10 +297,22 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	_hp_bar.add_theme_stylebox_override("fill", fill)
 	_stats_label = Label.new()
 	_stats_label.add_theme_font_size_override("font_size", 14)
-	top.add_child(_hp_bar)
+	_xp_bar = ProgressBar.new()
+	_xp_bar.custom_minimum_size = Vector2(260, 10)
+	_xp_bar.max_value = 1.0
+	_xp_bar.show_percentage = false
+	var xp_fill := StyleBoxFlat.new()
+	xp_fill.bg_color = Color(0.3, 0.7, 1.0)
+	_xp_bar.add_theme_stylebox_override("fill", xp_fill)
 	top.add_child(_stats_label)
+	top.add_child(_hp_bar)
+	top.add_child(_xp_bar)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(top)
-	top.position = Vector2(16, 16)
+	top.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)  # above the controls hint
+	top.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	top.offset_left = 16
+	top.offset_bottom = -100
 
 	var ammo := VBoxContainer.new()
 	ammo.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -339,7 +355,8 @@ func _update_status_hud() -> void:
 	var held: int = _player.inventory.count(w["ammo_item"])
 	_hp_bar.max_value = _player.max_health
 	_hp_bar.value = _player.health
-	_stats_label.text = "LEVEL %d   HP %d   FRAGS %d   SHOTS %d" % [depth + 1, _player.health, _player.kills, raid.shots]
+	_xp_bar.value = raid.xp_fraction()
+	_stats_label.text = "DEPTH %d   LV %d   HP %d   FRAGS %d   SHOTS %d" % [depth + 1, raid.raid_level(), _player.health, _player.kills, raid.shots]
 	_ammo_bar.total = w["clip"]
 	_ammo_bar.filled = shown
 	_cross.spread = w["spread"]
@@ -362,7 +379,7 @@ func _process(_d: float) -> void:
 	_update_status_hud()
 	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status()]
 	_update_threat_hud()
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold R to reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold R to reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
 		z["beam"].visible = shown
@@ -428,6 +445,26 @@ func _update_threat_hud() -> void:
 		var b := nearest_extract_bearing()
 		_tick.angle = b["angle"]
 		_tick.text = "%s %.0f m" % ["SAFE" if b["zone"]["id"] == "A" else "FAST", b["distance"]]
+
+# Esc during a raid: pause and show the controls; Esc again or the button resumes.
+func _open_pause() -> void:
+	if get_tree().paused or raid.state != raid.State.ACTIVE:
+		return
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_pause_layer = CanvasLayer.new()
+	_pause_layer.layer = 11
+	add_child(_pause_layer)
+	var menu := PauseMenu.new()
+	_pause_layer.add_child(menu)
+	menu.show_menu(_resume)
+
+func _resume() -> void:
+	_pause_layer.queue_free()
+	_pause_layer = null
+	get_tree().paused = false
+	if not _player.inventory_open:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 # A level-up: pause and offer upgrades; taking one resumes (and offers the next, if several were earned).
 func _open_pick() -> void:

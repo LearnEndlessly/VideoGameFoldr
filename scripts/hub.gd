@@ -30,7 +30,7 @@ const PIT_BOTTOM := Vector2(2.4, 1.8)  # the bottom (x, z in m)
 const PIT := PIT_BOTTOM + Vector2(2.0, 2.0) * PIT_DEPTH  # the opening in the floor: 45 degrees means 1 m out per 1 m down
 const PIT_MAP := Vector2(2.2, 1.6)  # the part of the pit floor the miniature may cover (m)
 const STATIONS := {
-	"raid": {"name": "RAID TERMINAL", "pos": Vector3(0, 0, -HALF_D + 1.0), "size": Vector3(3.0, 1.6, 0.8), "color": Color(0.2, 0.8, 0.3)},
+	"raid": {"panel_only": true, "name": "RAID TERMINAL", "pos": Vector3(0, 0, -HALF_D + 1.0), "size": Vector3(3.0, 1.6, 0.8), "color": Color(0.2, 0.8, 0.3)},
 	"stash": {"name": "STASH", "pos": Vector3(0, 0, HALF_D - 1.0), "size": Vector3(2.6, 1.2, 1.0), "color": Color(0.35, 0.45, 0.75)},
 	"armory": {"name": "ARMORY", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
@@ -45,6 +45,7 @@ const MAP_BUTTONS := {
 	"prev": {"label": "<", "name": "Previous map", "x": -0.6, "color": Color(0.8, 0.3, 0.25)},
 	"random": {"label": "?", "name": "Random map", "x": 0.0, "color": Color(0.85, 0.75, 0.2)},
 	"next": {"label": ">", "name": "Next map", "x": 0.6, "color": Color(0.3, 0.75, 0.35)},
+	"play": {"label": "", "name": "Raid terminal: pick the risk and start", "x": 1.4, "color": Color(0.15, 0.7, 0.25)},  # drawn as a play triangle
 }
 
 var profile  # scripts/profile.gd instance, set by main before add_child
@@ -66,7 +67,8 @@ var _status: Label
 func _ready() -> void:
 	_build_room()
 	for id in STATIONS:
-		_add_station(id)
+		if not STATIONS[id].get("panel_only", false):  # the raid terminal is opened from the map device's play button
+			_add_station(id)
 	_add_map_buttons()
 	player = Player.new()
 	player.position = Vector3(0, 0.1, 4.2)
@@ -181,12 +183,26 @@ func _add_station(id: String) -> void:
 func _add_map_buttons() -> void:
 	for id in MAP_BUTTONS:
 		var d: Dictionary = MAP_BUTTONS[id]
-		var body := _box(Vector3(0.45, 0.45, 0.06), Vector3(d["x"], 0.3, -0.6), d["color"])
+		var side := 0.62 if id == "play" else 0.45
+		var body := _box(Vector3(side, side, 0.06), Vector3(d["x"], 0.3, -0.6), d["color"])
 		body.rotation_degrees.x = -35.0  # leans back so its face points up toward a player looking down at the map
 		body.collision_layer = 2  # shots and E reach it, but the player walks through it
 		body.collision_mask = 0
 		body.add_to_group("shootable")
 		body.set_meta("action", id)
+		if id == "play":
+			var tri := MeshInstance3D.new()
+			var pm := PrismMesh.new()
+			pm.size = Vector3(0.34, 0.34, 0.03)
+			tri.mesh = pm
+			tri.rotation_degrees.z = -90.0  # the apex points right: a play triangle
+			tri.position = Vector3(0.02, 0, 0.05)
+			var tm := StandardMaterial3D.new()
+			tm.albedo_color = Color.WHITE
+			tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tri.material_override = tm
+			body.add_child(tri)
+			continue
 		var label := Label3D.new()
 		label.text = d["label"]
 		label.font_size = 90
@@ -197,6 +213,10 @@ func _add_map_buttons() -> void:
 # --- the map pit ---
 
 func _map_button(action: String) -> void:
+	if action == "play":
+		Sfx.play("switch")
+		_open_panel("raid")
+		return
 	match action:
 		"prev": set_seed(selected_seed - 1)
 		"next": set_seed(selected_seed + 1)
@@ -272,9 +292,9 @@ func scoreboard_rows() -> Array:
 		["KILLS", str(s["kills"])], ["SHOTS FIRED", str(s["shots"])],
 		["ACCURACY", "-" if acc < 0 else "%d%%" % acc], ["DEEPEST LEVEL", str(s["deepest"])]]
 
-# A board on the north wall beside the raid terminal: two rows of four big numbers.
+# A board in the middle of the north wall: two rows of four big numbers.
 func _add_scoreboard() -> void:
-	var cx := 5.5
+	var cx := 0.0
 	var z := -HALF_D + 0.05
 	_box(Vector3(6.4, 2.9, 0.04), Vector3(cx, 2.1, z), UIKit.AMBER)  # the frame
 	_box(Vector3(6.2, 2.7, 0.06), Vector3(cx, 2.1, z + 0.02), Color(0.04, 0.045, 0.06))
@@ -310,7 +330,7 @@ func _add_scoreboard() -> void:
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	var hint := UIKit.label("WASD MOVE    E / CLICK USE A STATION    SHOOT THE  < ? >  PANELS TO CHANGE MAP    ESC CLOSE", 13, UIKit.DIM)
+	var hint := UIKit.label("WASD MOVE    E / CLICK USE A STATION    SHOOT THE  < ? >  PANELS TO CHANGE MAP AND  >  TO DEPLOY    ESC CLOSE", 13, UIKit.DIM)
 	hint.position = Vector2(16, 12)
 	layer.add_child(hint)
 	_prompt = UIKit.label("", 24, UIKit.AMBER, true)
@@ -350,7 +370,11 @@ func _on_station_used(station: Node) -> void:
 	if station.has_meta("action"):  # a pad by the map pit, not a panel
 		_map_button(station.get_meta("action"))
 		return
-	open_station = station.get_meta("station_id")
+	_open_panel(station.get_meta("station_id"))
+
+# Opens a station's panel (the raid terminal has no body of its own: the map device's play button opens it).
+func _open_panel(id: String) -> void:
+	open_station = id
 	_status.text = ""
 	var accent: Color = STATIONS[open_station]["color"]
 	accent.a = 1.0

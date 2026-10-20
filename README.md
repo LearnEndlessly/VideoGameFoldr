@@ -50,12 +50,13 @@ base.gd, difficulty.gd, reload.gd, aim_color.gd  # the base of operations and sa
 The profile tests print a JSON parse error once; that is the deliberate corrupt-file case.
 
 ## What exists now
-- **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (choose the starting weapon), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and a raid terminal with five difficulty options that scale the rewards.
+- **Base of operations** (`scripts/hub.gd`): a walkable, enemy-free room you start in and return to. Stash, armory (choose the starting weapon), character (attribute points), a map pit showing the next raid's map with shootable `< ? >` controls, and the raid terminal (five difficulty options that scale the rewards), opened by the green play button next to the map pit's `< ? >` buttons rather than by a wall station.
 - **Raid**: seeded procedural map whose cover varies a lot from map to map (8 to 37 boxes in 160 seeds, a per-map cover mix and a per-map walkable gap of 2.7 to 4 m, `COVER_*` and `PATH_GAP_RANGE` in `data/tuning.gd`), two loot buildings (an olive armory with a yellow band, roof merlons and painted rounds; a white med post with a red cross on its walls and a big one on its roof), each taller than before (4.6 m / 4.2 m) with two doorways on opposite walls, cover, two safe nooks, enemy patrols with visible view cones and a suspicion meter, four enemy bases that respawn defenders (red beams show the countdown), ammo drops, a threat clock that sends every patrol after you.
 - **Extraction: two routes.** Zone A "Safe route" is far from the start with an 8 s hold. Zone B "Fast route" is close to the start with a 12 s hold and is noisy: starting a hold alerts every enemy group within 30 m. Extract beams only show within 25 m, so there is no compass; the map pit in the base shows both. A threat clock countdown (top right) turns amber at 30 s and red at 10 s, and after it fires an arrow points toward the nearest zone.
 - **Upgrades in the raid.** Weapon and character upgrades are won during a raid and lost when it ends (extract or death; a descent keeps them). Every 2 kills earns a level-up: the game pauses and offers 3 random upgrades (Heavy rounds, Rapid fire, Vitality, Fleet foot, Quick hands, Plating), pick with a click or 1/2/3. Numbers in `data/upgrades.gd`.
 - **Attributes** (speed, constitution, handling) are permanent and spent only at the base's Character station. At most 3 points come home from one raid (`POINTS_PER_RAID_MAX`).
-- **Powerups** (`data/powerups.gd`): an enemy kill drops one 25% of the time (`POWERUP_DROP_CHANCE`). It lies on the ground for 5 s (`POWERUP_PICKUP_SECONDS`), blinking at the end; touch it for 10 s of Overdrive (+50% damage), Haste (+40% speed) or Shield (half damage taken).
+- **Powerups** (`data/powerups.gd`): an enemy kill drops one 17.5% of the time (`POWERUP_DROP_CHANCE`, cut 30% from 25%). It lies on the ground for 5 s (`POWERUP_PICKUP_SECONDS`), blinking at the end; touch it for 10 s of Overdrive (+50% damage), Haste (+40% speed) or Shield (half damage taken).
+- **HUD and pause:** the health bar and a blue XP bar under it (kills toward the next level-up, with the raid level as `LV`) are at the bottom left, above the controls hint. Esc pauses the game and shows the controls as key caps; Esc or Resume continues. The depth shown as `DEPTH n` was `LEVEL n`.
 - **Reloading** runs only while R is held; letting go cancels it. The pistol's magazine is 14 rounds (45% of the old 30).
 - **No saves yet:** a real launch starts with an empty profile (no stash, points, attributes or difficulty choices); the base and raids within one session keep what was earned (`RESET_ON_LAUNCH` in `data/tuning.gd`). Test and tool profiles are never reset.
 - **Scoreboard.** The base's north wall carries the RAID LEDGER: runs, extracted, killed in action, survival rate, kills, shots fired, accuracy (shots that hurt something) and deepest level, kept in the profile for every raid (`Profile.record_raid`).
@@ -79,6 +80,12 @@ All in `data/tuning.gd`:
 
 ## Tuning values to look at first (going deeper)
 All in `data/tuning.gd`: `DEPTH_EXTRA_SPAWNERS` (1) and `DEPTH_MAX_EXTRA_SPAWNERS` (4), `DEPTH_INTERVAL_MULT` (0.85 per level) and `DEPTH_MIN_INTERVAL` (4 s), `DEPTH_MAX_ALIVE_EVERY` (2), `DEPTH_AMMO_BONUS` (6), `DEPTH_DROP_BONUS` (0.25), `DEPTH_REWARD_BONUS` (0.25).
+
+## Assumptions made for the menu changes
+- "Controller description" is the keyboard and mouse controls list; there is no gamepad support, and the screen says so.
+- The XP bar fills with kills toward the next level-up (2 kills each, so it moves in halves); the raid level is 1 + upgrades taken.
+- Removing the raid terminal's wall station left the north wall free, so the Raid Ledger moved to its middle.
+- The pause menu only resumes; there is no abandon-raid button.
 
 ## Assumptions made for the in-raid upgrades and powerups
 - "Character and weapon upgrades" became the six raid upgrades above (the old stash-paid weapon upgrades are gone, and old saves' weapon levels are ignored); "attributes" stayed as the permanent base system. Say if you meant something else.

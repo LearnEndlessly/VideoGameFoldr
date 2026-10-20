@@ -123,7 +123,7 @@ func _run() -> void:
 	await process_frame
 	var hub = main.get_children().filter(func(c): return "open_station" in c)[0]
 	_check(main.get_children().filter(func(c): return "stats" in c or "group_id" in c).is_empty(), "the base must have no enemies or enemy bases")
-	_check(get_nodes_in_group("station").size() == 5, "the base should have 4 wall stations and the map table")
+	_check(get_nodes_in_group("station").size() == 4, "the base should have 3 wall stations and the map device")
 	_check(not main.get_children().any(func(c): return "raid_id" in c) and main.raid == null, "the base is not a raid")
 	var armory = get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "armory")[0]
 	hub._on_station_used(armory)
@@ -137,7 +137,8 @@ func _run() -> void:
 	_check(saved.equipped == "scattergun" and saved.attr_level("speed") == 1 and saved.points == 0, "equip and attribute changes should be saved")
 	var started := [-1]
 	hub.start_raid = func(map_seed): started[0] = map_seed
-	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "raid")[0])
+	hub._map_button("play")
+	_check(hub.open_station == "raid" and hub._panel.visible, "the map device's play button should open the raid terminal")
 	hub._start()
 	_check(started[0] == hub.selected_seed, "the raid terminal should start the raid on the selected map, got %s" % started[0])
 	hub._close()
@@ -161,7 +162,7 @@ func _run() -> void:
 
 	# The buttons on the table: shoot one from across the room and the map changes, at no cost in ammo.
 	var buttons := get_nodes_in_group("shootable")
-	_check(buttons.size() == 3, "the table should have previous, random and next buttons")
+	_check(buttons.size() == 4, "the table should have previous, random, next and play buttons")
 	var hp = hub.player
 	var stash_before: Dictionary = main.profile.totals.duplicate()
 	var backpack_before: int = hp.inventory.count("ammo")
@@ -175,6 +176,14 @@ func _run() -> void:
 		hp._hub_shoot()
 		_check(hub.selected_seed == before + pair[1], "shooting the %s button should step the map, %d -> %d" % [pair[0], before, hub.selected_seed])
 	_check(main.profile.totals == stash_before and hp.inventory.count("ammo") == backpack_before, "shots in the base must not use any ammo")
+	var play = buttons.filter(func(n): return n.get_meta("action") == "play")[0]
+	var to_play: Vector3 = play.global_position - hp._cam.global_position
+	hp.rotation.y = atan2(-to_play.x, -to_play.z)
+	hp._head.rotation.x = atan2(to_play.y, Vector2(to_play.x, to_play.z).length())
+	await _frames(2)
+	hp._hub_shoot()
+	_check(hub.open_station == "raid" and hub._panel.visible, "shooting the play button should open the raid terminal")
+	hub._close()
 	_check(not hub._panel.visible and not hub.player.inventory_open, "closing should hide the panel and free the mouse look")
 	main.queue_free()
 	await process_frame
