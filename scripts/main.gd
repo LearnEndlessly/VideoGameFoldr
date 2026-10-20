@@ -329,7 +329,7 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	ammo.add_child(_ammo_bar)
 	ammo.add_child(_ammo_label)
 	_reload_tip = Label.new()
-	_reload_tip.text = "Hold R to reload"
+	_reload_tip.text = "R to reload"
 	_reload_tip.add_theme_font_size_override("font_size", 16)
 	_reload_tip.add_theme_color_override("font_color", Color(1, 0.9, 0.1))
 	_reload_tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -388,7 +388,7 @@ func _process(_d: float) -> void:
 	_update_status_hud()
 	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status()]
 	_update_threat_hud()
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold RMB to zoom, hold R to reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
+	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold RMB to zoom, R reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
 		z["beam"].visible = shown

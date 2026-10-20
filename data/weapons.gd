@@ -6,7 +6,7 @@
 # Each shot spends ammo_per_shot of the backpack item ammo_item; with too little the weapon cannot fire.
 # "zoom_fov": the camera's field of view while the right mouse button is held (75 normally); "scope": true shows the
 # black scope overlay instead of the weapon and crosshair once zoomed.
-# "clip" is how many rounds the magazine holds; while R is held the player reloads from the backpack (letting go cancels it). The pistol holds 45% of the old 30.
+# "clip" is how many rounds the magazine holds; one press of R reloads a full magazine from the backpack (switching weapon cancels it). The pistol holds 45% of the old 30.
 const DATA := {
 	"pistol": {"name": "Pistol", "damage": 25, "pellets": 1, "spread": 0.0, "cooldown": 0.25, "effective": 25.0, "max": 60.0, "sound": "shoot_pistol", "ammo_item": "ammo", "ammo_per_shot": 1, "clip": 14, "zoom_fov": 55.0, "model": "res://assets/weapons/kenney_blaster_kit/blaster-k.glb", "model_scale": 0.6},
 	"scattergun": {"name": "Scattergun", "damage": 14, "pellets": 8, "spread": 0.07, "cooldown": 0.9, "effective": 10.0, "max": 24.0, "sound": "shoot_scatter", "ammo_item": "ammo", "ammo_per_shot": 2, "clip": 30, "zoom_fov": 62.0, "model": "res://assets/weapons/kenney_blaster_kit/blaster-a.glb", "model_scale": 0.6},

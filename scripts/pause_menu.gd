@@ -7,7 +7,7 @@ const UIKit = preload("res://scripts/ui_kit.gd")
 # [key, what it does]
 const CONTROLS := [
 	["W A S D", "Move"], ["MOUSE", "Look around"], ["SHIFT", "Sprint (loud: enemies hear it through walls)"],
-	["SPACE", "Jump"], ["LEFT CLICK", "Shoot"], ["HOLD R", "Reload (letting go cancels it)"],
+	["SPACE", "Jump"], ["LEFT CLICK", "Shoot"], ["R", "Reload a full magazine (switching weapon cancels it)"],
 	["HOLD RMB", "Zoom in (the sniper rifle looks through its scope)"], ["E", "Open a crate you are looking at"], ["TAB", "Backpack (click an item to use it, right-click to drop)"],
 	["ESC", "This menu"],
 ]

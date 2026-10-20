@@ -18,6 +18,7 @@ signal pause_requested  # raid only: Esc
 const MAX_HEALTH := 100
 const SENS := 0.002
 const BASE_FOV := 75.0
+const VIEW_POS := Vector3(0.22, -0.2, -0.5)  # where the weapon model is held, in camera space
 const ZOOM_FOV_SPEED := 500.0  # degrees per second the field of view moves toward its target
 
 var health := MAX_HEALTH
@@ -28,7 +29,9 @@ var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
 var inventory_open := false
-var _key_reload := false  # the current reload was started by holding R
+var _mag_old: MeshInstance3D  # the magazine that drops out during a reload
+var _mag_new: MeshInstance3D  # the one that goes in
+var _mag_clicked := false  # the seat click for this reload has played
 var inventory := Inventory.new()
 var raid  # simulation that validates loot requests; set by main
 var weapon_id := "pistol"
@@ -56,6 +59,8 @@ func _ready() -> void:
 	_cam = Camera3D.new()
 	_head.add_child(_cam)
 	_show_viewmodel()
+	_mag_old = _make_mag()
+	_mag_new = _make_mag()
 	var line := BoxMesh.new()
 	line.size = Vector3(0.012, 0.012, 1)
 	_beam = _make_mesh(line, Color(0.2, 1, 0.3))
@@ -125,6 +130,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if i < pool.size() and pool[i] != weapon_id:
 				select_weapon(pool[i])
 				Sfx.play("switch")
+		elif event.keycode == KEY_R and raid != null:  # one press loads a full magazine
+			if raid.request_reload():
+				Sfx.play("switch")
 		elif event.keycode == KEY_E:
 			var hit := _cast(3.0)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
@@ -177,14 +185,6 @@ func _physics_process(delta: float) -> void:
 			_step_dist = 0.0
 			Sfx.play("step_player")
 
-	if raid != null:  # a reload started with R only runs while R is held; letting go cancels it
-		if Input.is_physical_key_pressed(KEY_R) and not inventory_open:
-			if raid.request_reload():
-				_key_reload = true
-				Sfx.play("switch")
-		elif _key_reload:
-			_key_reload = false
-			raid.cancel_reload()
 	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		raid.request_fire(weapon_id, _cam.global_transform)  # the raid checks cooldown and ammo
@@ -192,7 +192,67 @@ func _physics_process(delta: float) -> void:
 # The aim line follows the camera, so it updates every rendered frame (physics ticks lag the mouse).
 func _process(delta: float) -> void:
 	_update_zoom(delta)
+	_update_reload_anim()
 	_update_aim()
+
+# How far the current reload has got, 0..1, or -1 when none is running.
+func reload_progress() -> float:
+	if raid == null or raid.reload_weapon != weapon_id or raid.reload_seconds <= 0.0:
+		return -1.0
+	return clampf(1.0 - raid.reload_left / raid.reload_seconds, 0.0, 1.0)
+
+func _make_mag() -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.07, 0.18, 0.1)
+	m.mesh = bm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.16, 0.16, 0.2)
+	m.material_override = mat
+	var brass := MeshInstance3D.new()  # the rounds showing at the top
+	var tm := BoxMesh.new()
+	tm.size = Vector3(0.055, 0.04, 0.085)
+	brass.mesh = tm
+	brass.position.y = 0.105
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color(1.0, 0.8, 0.2)
+	brass.material_override = bmat
+	m.add_child(brass)
+	m.visible = false
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_cam.add_child(m)
+	return m
+
+# The reload, shown: the gun dips and rolls, the old magazine drops out and falls away, a new one rises into the
+# grip with a click, and the gun comes back up. Purely visual; the raid decides when the magazine is full.
+func _update_reload_anim() -> void:
+	var p := reload_progress()
+	if p < 0.0 or scoped:
+		_mag_old.visible = false
+		_mag_new.visible = false
+		_mag_clicked = false
+		if _viewmodel != null:
+			_viewmodel.position = VIEW_POS
+			_viewmodel.rotation_degrees = Vector3.ZERO
+		return
+	var dip := smoothstep(0.0, 0.2, p) * (1.0 - smoothstep(0.78, 1.0, p))
+	var kick := -0.035 * sin(clampf((p - 0.68) / 0.12, 0.0, 1.0) * PI)  # the slap when the magazine seats
+	var gun := VIEW_POS + Vector3(-0.03, -0.06, 0.0) * dip + Vector3(0, kick, 0)
+	if _viewmodel != null:
+		_viewmodel.position = gun
+		_viewmodel.rotation_degrees = Vector3(12.0 * dip, 0.0, 22.0 * dip)
+	var seat := gun + Vector3(-0.02, -0.07, -0.2)  # further out so the whole fall stays on screen
+	var fall := clampf((p - 0.12) / 0.38, 0.0, 1.0)
+	_mag_old.visible = p >= 0.12 and fall < 1.0
+	_mag_old.position = seat + Vector3(-0.05 * fall, -0.55 * fall * fall - 0.03 * fall, 0.0)
+	_mag_old.rotation_degrees = Vector3(0, 0, 240.0 * fall)
+	var rise := clampf((p - 0.45) / 0.25, 0.0, 1.0)
+	_mag_new.visible = p >= 0.45 and p < 0.82
+	_mag_new.position = seat + Vector3(0.0, -0.3 * (1.0 - rise * rise * (3.0 - 2.0 * rise)), 0.0)
+	_mag_new.rotation_degrees = Vector3.ZERO
+	if p >= 0.7 and not _mag_clicked:
+		_mag_clicked = true
+		Sfx.play("switch")
 
 # Holding the right mouse button in a raid zooms to the weapon's zoom_fov; a scoped weapon shows the scope once
 # it is most of the way in.
@@ -222,7 +282,7 @@ func _show_viewmodel() -> void:
 	if model == null:
 		return
 	model.name = "Viewmodel"
-	model.position = Vector3(0.22, -0.2, -0.5)
+	model.position = VIEW_POS
 	model.scale = Vector3.ONE * float(weapon.get("model_scale", 1.0))
 	_cam.add_child(model)
 	_viewmodel = model

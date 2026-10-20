@@ -170,7 +170,7 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 
-	# Holding R reloads, letting go cancels.
+	# One press of R loads a full magazine, and the gun shows it: the old magazine drops, the new one rises in.
 	main = await _raid()
 	raid = main.raid
 	player = main._player
@@ -178,17 +178,20 @@ func _run() -> void:
 	player.inventory.add("ammo", 30)
 	raid.loaded["pistol"] = 4
 	var key := InputEventKey.new()
-	key.physical_keycode = KEY_R
 	key.keycode = KEY_R
+	key.physical_keycode = KEY_R
 	key.pressed = true
-	Input.parse_input_event(key)
-	await _frames(10)
-	_check(raid.reload_weapon == "pistol", "holding R should start a reload")
-	key = key.duplicate()
-	key.pressed = false
-	Input.parse_input_event(key)
-	await _frames(10)
-	_check(raid.reload_weapon == "" and raid.loaded_rounds("pistol") == 4, "letting go of R should cancel the reload")
+	player._unhandled_input(key)
+	_check(raid.reload_weapon == "pistol", "pressing R should start a reload")
+	await _frames(int(Tuning.RELOAD_SECONDS * 60.0 * 0.25))
+	_check(player.reload_progress() > 0.12 and player._mag_old.visible and not player._mag_new.visible, "early on the old magazine should be dropping")
+	if player._viewmodel != null:
+		_check(player._viewmodel.position != player.VIEW_POS, "the gun should dip during a reload")
+	await _frames(int(Tuning.RELOAD_SECONDS * 60.0 * 0.3))
+	_check(player._mag_new.visible and not player._mag_old.visible, "then the new magazine should rise in")
+	await _frames(int(Tuning.RELOAD_SECONDS * 60.0 * 0.6))
+	_check(raid.reload_weapon == "" and raid.loaded_rounds("pistol") == WeaponData.DATA["pistol"]["clip"], "one press should finish with a full magazine, got %d" % raid.loaded_rounds("pistol"))
+	_check(not player._mag_new.visible and not player._mag_old.visible and (player._viewmodel == null or player._viewmodel.position == player.VIEW_POS), "the animation should end with the gun back in place")
 	main.queue_free()
 	await process_frame
 	DirAccess.remove_absolute(PATH)

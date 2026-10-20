@@ -131,6 +131,15 @@ func _init() -> void:
 	player.select_weapon("pistol")
 	await _frames(20)
 
+	# A reload part way: the old magazine falling, then the new one going in.
+	main.raid.loaded["pistol"] = 3
+	main.raid.request_reload()
+	await _frames(26)
+	await _shot("13_reload_drop")
+	await _frames(30)
+	await _shot("14_reload_insert")
+	await _frames(40)
+
 	# Extract countdown, then the threat warning.
 	player.global_position = main.extract_pos + Vector3(0, 0.05, 0)
 	await _frames(100)
