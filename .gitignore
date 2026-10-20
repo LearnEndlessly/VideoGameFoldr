@@ -1,0 +1,17 @@
+# Godot 4
+.godot/
+/android/
+*.translation
+
+# Exports
+export_presets.cfg
+export_credentials.cfg
+*.exe
+*.pck
+*.apk
+*.aab
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.tmp
