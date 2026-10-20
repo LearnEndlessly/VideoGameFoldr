@@ -238,13 +238,27 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	ammo.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ammo.offset_top = 40  # clear of the weapon's crosshair circle
 
+# "Enemies left" counts the living enemies on the map; the respawn countdown is the soonest of the bases
+# that are still spawning (a base holds its timer while its group is full).
+func _enemy_status() -> String:
+	var alive := get_tree().get_nodes_in_group("enemy").filter(func(e): return not e.is_queued_for_deletion()).size()
+	var bases := _spawners.filter(is_instance_valid)
+	if bases.is_empty():
+		return "Enemies left: %d   ALL ENEMY BASES DESTROYED" % alive
+	var soonest := INF
+	for b in bases:
+		if get_tree().get_nodes_in_group("pack_%d" % b.group_id).size() < Tuning.SPAWNER_MAX_ALIVE:
+			soonest = minf(soonest, b.time_left())
+	var timer := "%.0f s" % ceilf(soonest) if soonest < INF else "-"
+	return "Enemies left: %d\nEnemy bases: %d   Next respawn: %s" % [alive, bases.size(), timer]
+
 func _update_status_hud() -> void:
 	var id: String = _player.weapon_id
 	var w: Dictionary = _player.weapon
 	var shown: int = raid.shown_rounds(id)
 	var held: int = _player.inventory.count(w["ammo_item"])
 	_hp_bar.value = _player.health
-	_stats_label.text = "HP %d   KILLS %d   SHOTS %d" % [_player.health, _player.kills, raid.shots]
+	_stats_label.text = "HP %d   FRAGS %d   SHOTS %d" % [_player.health, _player.kills, raid.shots]
 	_ammo_bar.total = w["clip"]
 	_ammo_bar.filled = shown
 	_cross.spread = w["spread"]
@@ -263,9 +277,7 @@ func _process(_d: float) -> void:
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds
 	_update_status_hud()
-	var left := _spawners.filter(is_instance_valid).size()
-	var base := "Enemy bases left: %d" % left if left > 0 else "ALL ENEMY BASES DESTROYED"
-	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", base]
+	_hud.text = "%s %s\n%s" % ["[SAFE]" if _player.safe else "", "[PATROLS CONVERGING]" if raid.threat_active else "", _enemy_status()]
 	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, R reload, E open crate, Tab backpack, Esc free mouse. Crates are only in the small walled rooms. Hold the green zone for %.0f s to extract." % hold
 	_zone_mat.albedo_color = Color(1, 0.9, 0.1, 0.45) if raid.extracting else Color(0, 1, 0.2, 0.25)
 	_extract_box.visible = raid.extracting

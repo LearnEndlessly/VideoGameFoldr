@@ -128,6 +128,17 @@ func _run() -> void:
 	var count := main.get_children().filter(func(c): return "stats" in c).size()
 	_check(count >= 3 * Tuning.ENEMY_GROUP_SIZE_MIN and count <= 3 * Tuning.ENEMY_GROUP_SIZE_MAX, "%d enemies at the start" % count)
 
+	# Beacon: the red beam narrows as the countdown runs, and is wide again right after a spawn.
+	var b = main._spawners[1]
+	var t0: float = b.time_left()
+	var w0: float = b._beam.scale.x
+	b._physics_process(1.0)
+	_check(absf(b.time_left() - (t0 - 1.0)) < 0.001, "the countdown should run down with time")
+	_check(b._beam.scale.x < w0, "the beam should narrow as the countdown runs")
+	b._physics_process(b.time_left() + 0.01)
+	_check(get_nodes_in_group("pack_%d" % b.group_id).size() == 1, "an enemy should appear when the countdown ends")
+	_check(b._beam.scale.x > 0.95 * b.BEAM_RADIUS, "after a spawn the beam should be wide again")
+
 	# Spawner: one enemy per interval, capped, in its own group.
 	_check(main._spawners.size() == Tuning.SPAWNER_COUNT, "the map should have %d enemy bases" % Tuning.SPAWNER_COUNT)
 	var sp = main._spawners[0]
@@ -138,6 +149,9 @@ func _run() -> void:
 	var pack := get_nodes_in_group("pack_%d" % sp.group_id)
 	_check(pack.size() == Tuning.SPAWNER_MAX_ALIVE, "base group was %d, expected the cap of %d" % [pack.size(), Tuning.SPAWNER_MAX_ALIVE])
 	_check(pack.all(func(e): return e.home == sp.global_position), "spawned enemies should defend the base")
+	var held: float = sp.time_left()
+	sp._physics_process(1.0)
+	_check(sp.time_left() == held, "a base whose group is full must hold its countdown")
 
 	# Destroying it: no kill is counted, the spawning stops, defenders are woken.
 	_check(not sp.take_damage(Tuning.SPAWNER_HEALTH - 1), "a non-lethal hit must not destroy the base")
