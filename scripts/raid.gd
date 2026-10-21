@@ -427,7 +427,7 @@ func _drop_ammo(pos: Vector3, stats: Dictionary) -> bool:
 # The player walked into a pickup: move what fits into the backpack; the rest stays on the ground.
 func request_pickup(pickup) -> bool:
 	if state != State.ACTIVE or not is_instance_valid(pickup) \
-			or _player.global_position.distance_to(pickup.global_position) > Tuning.LOOT_REACH:
+			or _player.global_position.distance_to(pickup.global_position) > Tuning.LOOT_REACH + _bonus("loot_reach"):
 		return false
 	var left: int = _player.inventory.add(pickup.id, pickup.qty)
 	if left == pickup.qty:
@@ -483,7 +483,7 @@ func cancel_extract() -> void:
 func request_loot(crate) -> bool:
 	if state != State.ACTIVE or not is_instance_valid(crate):
 		return false
-	if _player.global_position.distance_to(crate.global_position) > Tuning.LOOT_REACH:
+	if _player.global_position.distance_to(crate.global_position) > Tuning.LOOT_REACH + _bonus("loot_reach"):
 		Telemetry.emit("player.open.crate", {"outcome": "far", "taken": {}, "zone": crate.zone_id, "pos": crate.global_position})
 		return false
 	var taken: Dictionary = crate.take_into(_player.inventory)

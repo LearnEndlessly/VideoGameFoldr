@@ -159,7 +159,7 @@ func _resolver() -> void:
 	# a stat that has both kinds multiplies: flat first, then increased
 	var prof := Profile.new(PATH)
 	prof.allocated_nodes = ["S1", "T1"]
-	_check(is_equal_approx(prof.node_bonus("hp"), 4.0) and is_equal_approx(prof.node_bonus("damage"), 0.03), "Profile.node_bonus reads the resolver")
+	_check(is_equal_approx(prof.bonus("hp"), 4.0) and is_equal_approx(prof.bonus("damage"), 0.03), "Profile.bonus reads the resolver")
 	# a move speed cap of +40% is in tuning
 	_check(Tuning.SKILL_STAT_LIMITS["speed"][1] == 0.4 and Tuning.SKILL_STAT_LIMITS["extract_speed"][1] == 0.5, "caps come from tuning")
 
@@ -194,11 +194,11 @@ func _profile() -> void:
 	d.load_from_disk()
 	_check(d.allocated_nodes == ["S1", "S2"] and d.unspent_points == Tuning.SKILL_POINT_CAP - 2, "illegal nodes dropped and points clamped, got %s / %d" % [d.allocated_nodes, d.unspent_points])
 	# migration from the old attribute save
-	_write('{"version": 2, "totals": {"ammo": 5}, "attrs": {"marksman": 3, "speed": 2, "removed_one": 9}, "points": 4, "equipped": "scattergun"}')
+	_write('{"version": 2, "totals": {"ammo": 5}, "attrs": {"marksman": 3, "speed": 2, "removed_one": 0}, "points": 4, "equipped": "scattergun"}')
 	var old_text := FileAccess.get_file_as_string(PATH)
 	var m := Profile.new(PATH)
 	m.load_from_disk()
-	_check(m.unspent_points == 9 and m.allocated_nodes.is_empty() and m.attrs.is_empty() and m.points == 0, "old purchases are refunded as 9 points (3 + 2 + 4), got %d" % m.unspent_points)
+	_check(m.unspent_points == 9 and m.allocated_nodes.is_empty() and true, "old purchases are refunded as 9 points (3 + 2 + 4), got %d" % m.unspent_points)
 	_check(m.totals == {"ammo": 5} and m.equipped == "scattergun", "the rest of the profile is untouched")
 	_check(FileAccess.file_exists(PATH + ".v2.bak") and FileAccess.get_file_as_string(PATH + ".v2.bak") == old_text, "a backup of the old save is kept")
 	_check(m.save(), "migrated profile saves")

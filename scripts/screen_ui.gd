@@ -49,7 +49,7 @@ func show_result(result: Dictionary, level: int, on_home: Callable, on_descend: 
 	stats.add_child(UIKit.tile("time", "%d:%02d" % [int(result["duration"]) / 60, int(result["duration"]) % 60], accent))
 	stats.add_child(UIKit.tile("score", str(result.get("score", 0)), accent))
 	if result["points"] > 0:  # a cleared round earns an attribute point, kept even if the raid is lost
-		stats.add_child(UIKit.tile("attribute pts", "+%d" % result["points"], UIKit.AMBER, UIKit.AMBER))
+		stats.add_child(UIKit.tile("skill pts", "+%d" % result["points"], UIKit.AMBER, UIKit.AMBER))
 	if extracted:
 		stats.add_child(UIKit.tile("reward", "x%.2f" % result["reward_mult"], UIKit.AMBER, UIKit.AMBER))
 

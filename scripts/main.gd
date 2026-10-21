@@ -241,7 +241,7 @@ func _build_raid() -> void:
 		if count >= 2:
 			_combo.show_paid("COMBO x%d  +%d" % [count, bonus]))
 	raid.point_earned.connect(func():
-		_banner.text = "NEW ATTRIBUTE POINT AT THE CHARACTER SCREEN\nRound %d cleared" % raid.round_number()
+		_banner.text = "NEW SKILL POINT AT THE CHARACTER STATION\nRound %d cleared" % raid.round_number()
 		_banner_time = 7.0
 		Sfx.play("pickup"))
 	raid.attachment_broke.connect(func(attachment_name: String):

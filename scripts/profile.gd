@@ -1,10 +1,9 @@
 extends RefCounted
-# Persisted player data, kept between raids: the stash (loot kept), the equipped weapon, attribute levels and unspent points, and lifetime stats. Separate from raid state; loot only
+# Persisted player data, kept between raids: the stash (loot kept), the equipped weapon, skill tree nodes and unspent points, and lifetime stats. Separate from raid state; loot only
 # gets in through add_items() after a successful extract. Every change is saved by the caller (save()).
 
 const Tuning = preload("res://data/tuning.gd")
 const Loot = preload("res://data/loot.gd")
-const Upgrades = preload("res://data/upgrades.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 const Attachments = preload("res://data/attachments.gd")
@@ -16,11 +15,11 @@ var totals := {}  # item id -> quantity in the stash
 var attached := {}  # weapon id -> attachment id fitted to it (one per weapon); the attachments themselves are in `totals`
 var wear := {}  # attachment id -> shots left (missing = full)
 var equipped := "pistol"  # the weapon held at the start of a raid
-var attrs := {}  # attribute id -> level (missing = 0)
-var points := 0  # old attribute points; the skill tree uses unspent_points (removed in the wiring step)
 var allocated_nodes: Array = []  # skill tree node ids taken (data/skill_nodes.gd), in the order they were taken
 var unspent_points := 0  # points to spend in the skill tree
+var stat_override := {}  # stat -> value that replaces the tree's bonus; tests use it to drive one stat without nodes
 const SAVE_VERSION := 3
+const OLD_ATTR_LEVEL_MAX := 5  # the most levels one old attribute could hold, for refunding old saves
 var difficulty := {}  # raid difficulty option id -> level index (missing = Normal); see data/difficulty.gd
 # Lifetime scoreboard numbers. "runs" counts runs (a descent is part of the run it came from), "deepest" is the deepest level reached
 # (1 = the first), "hits" counts shots that hurt something, so hits / shots is the accuracy.
@@ -35,8 +34,6 @@ func load_from_disk() -> void:
 	equipped = "pistol"
 	attached = {}
 	wear = {}
-	attrs = {}
-	points = 0
 	allocated_nodes = []
 	unspent_points = 0
 	difficulty = {}
@@ -88,7 +85,7 @@ func load_from_disk() -> void:
 		for k in STAT_DEFAULTS:
 			stats[k] = maxi(int(s.get(k, STAT_DEFAULTS[k])), 0)
 
-# Save versions before 3 held attribute levels and unspent points. Keep a copy of the file (once), refund every purchase as
+# Save versions before 3 held skill tree nodes and unspent points. Keep a copy of the file (once), refund every purchase as
 # an unspent skill point (held to the point cap) and start with an empty tree. The old fields are not carried forward.
 func _migrate_old_attributes(data: Dictionary) -> void:
 	if not FileAccess.file_exists(path + ".v2.bak"):
@@ -97,8 +94,7 @@ func _migrate_old_attributes(data: Dictionary) -> void:
 	var a = data.get("attrs")
 	if typeof(a) == TYPE_DICTIONARY:
 		for id in a:
-			if Upgrades.ATTRS.has(str(id)):
-				refunded += clampi(int(a[id]), 0, Upgrades.ATTR_LEVEL_MAX)
+			refunded += clampi(int(a[id]), 0, OLD_ATTR_LEVEL_MAX)
 	unspent_points = mini(refunded, Tuning.SKILL_POINT_CAP)
 
 func add_items(items: Dictionary) -> void:
@@ -185,7 +181,7 @@ func record_raid(extracted: bool, kills: int, shots: int, hits: int, level: int)
 func accuracy() -> int:
 	return -1 if stats["shots"] <= 0 else int(round(100.0 * stats["hits"] / stats["shots"]))
 
-# A successful extract: count it on the scoreboard. (Attribute points come from clearing rounds, see grant_point.)
+# A successful extract: count it on the scoreboard. (Skill points come from clearing rounds, see grant_point.)
 func record_extract() -> void:
 	stats["extracts"] += 1
 
@@ -211,17 +207,7 @@ func set_difficulty(id: String, level: int) -> bool:
 func reward_mult() -> float:
 	return Difficulty.reward_mult(difficulty)
 
-# --- attributes ---
-
-func attr_level(id: String) -> int:
-	return int(attrs.get(id, 0))
-
-# Points already spent, across every attribute.
-func attr_total() -> int:
-	var t := 0
-	for id in attrs:
-		t += int(attrs[id])
-	return t
+# --- skill points and stats ---
 
 # A cleared round earns a skill point, unless the points held and allocated already reach Tuning.SKILL_POINT_CAP. True if one was added.
 func grant_point() -> bool:
@@ -258,25 +244,11 @@ func refund_node(id: String) -> bool:
 	take_items({"ammo": Tuning.SKILL_REFUND_AMMO})
 	return true
 
-# What the tree adds to a stat (scripts/skill_stats.gd), floors and caps applied.
-func node_bonus(stat: String) -> float:
-	return SkillStats.bonus(stat, allocated_nodes)
-
-# Spends one point on an attribute. False if there is no point to spend, the attribute is at ATTR_LEVEL_MAX or the
-# total spent is at ATTR_TOTAL_MAX.
-func spend_point(id: String) -> bool:
-	if not Upgrades.ATTRS.has(id) or points <= 0 or attr_level(id) >= Upgrades.ATTR_LEVEL_MAX or attr_total() >= Upgrades.ATTR_TOTAL_MAX:
-		return false
-	points -= 1
-	attrs[id] = attr_level(id) + 1
-	return true
-
-# What the attributes add to `stat` (data/upgrades.gd STATS): every attribute's level times what one level adds.
+# What the skill tree adds to `stat` (scripts/skill_stats.gd, floors and caps applied); 0 for a stat no node gives.
 func bonus(stat: String) -> float:
-	var t := 0.0
-	for id in attrs:
-		t += float(Upgrades.ATTRS[id]["stats"].get(stat, 0.0)) * int(attrs[id])
-	return t
+	if stat_override.has(stat):
+		return float(stat_override[stat])
+	return SkillStats.bonus(stat, allocated_nodes)
 
 func speed_mult() -> float:
 	return 1.0 + bonus("speed")
@@ -288,7 +260,7 @@ func armor() -> float:
 	return bonus("armor")
 
 func reload_mult() -> float:
-	return 1.0 - bonus("reload")
+	return maxf(1.0 - bonus("reload"), 0.25)  # a reload never gets under a quarter of its time
 
 # Writes to a temp file first so a crash mid-save cannot corrupt the existing profile.
 func save() -> bool:

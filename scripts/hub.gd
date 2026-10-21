@@ -4,7 +4,7 @@ extends Node3D
 #   STASH       the loot kept from raids
 #   AMMO DEPOT  choose the starting weapon (the only weapon taken into a raid)
 #   GUNSMITH    fit looted attachments to weapons (each adds to damage, fire rate, reload or zoom), remove them, repair them with scrap
-#   CHARACTER   spend attribute points: 35 attributes, up to 5 levels each and 15 points in all (data/upgrades.gd)
+#   CHARACTER   skill points and the skill tree (data/skill_nodes.gd)
 #   MAP PIT     a miniature of the next raid's map seen from above through a glass cover; panels hovering
 #               over it (shoot them) change the map number
 #   RAID TERMINAL  the button that starts a raid on the map in the pit
@@ -557,10 +557,6 @@ func _equip(id: String) -> void:
 	if profile.equip(id):
 		_commit()
 
-func _spend(id: String) -> void:
-	if profile.spend_point(id):
-		_commit()
-
 func _fill_stash() -> void:
 	var a := _accent()
 	var row := _row()
@@ -703,58 +699,18 @@ func _repair(att: String) -> void:
 func _fill_character() -> void:
 	var a := _accent()
 	var top := _row(null, 14)
-	top.add_child(UIKit.label(str(profile.points), 56, UIKit.AMBER, true))
+	top.add_child(UIKit.label(str(profile.unspent_points), 56, UIKit.AMBER, true))
 	var cap := VBoxContainer.new()
 	cap.alignment = BoxContainer.ALIGNMENT_CENTER
 	cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(cap)
-	cap.add_child(UIKit.label("ATTRIBUTE POINTS", 18, UIKit.TEXT, true))
-	var how := UIKit.label("A point for every %d rounds cleared (kill every enemy, destroy every enemy base). Each attribute takes up to %d levels, and %d points can be spent in all." % [Upgrades.ATTR_ROUNDS_PER_POINT, Upgrades.ATTR_LEVEL_MAX, Upgrades.ATTR_TOTAL_MAX], 12, UIKit.DIM)
+	cap.add_child(UIKit.label("SKILL POINTS", 18, UIKit.TEXT, true))
+	var how := UIKit.label("A point for every %d rounds cleared (kill every enemy, destroy every enemy base). The skill tree screen is the next step; until it is built the points wait here." % Upgrades.ATTR_ROUNDS_PER_POINT, 12, UIKit.DIM)
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(430, 0)
 	cap.add_child(how)
-	top.add_child(UIKit.tile("spent", "%d / %d" % [profile.attr_total(), Upgrades.ATTR_TOTAL_MAX], a, UIKit.TEXT, 100))
+	top.add_child(UIKit.tile("allocated", "%d / %d" % [profile.allocated_nodes.size(), Tuning.SKILL_POINT_CAP], a, UIKit.TEXT, 100))
 	top.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a, UIKit.TEXT, 90))
-	top.add_child(UIKit.tile("armor", "%.0f%%" % (profile.armor() * 100.0), a, UIKit.TEXT, 90))
-	_scroll = ScrollContainer.new()
-	_scroll.custom_minimum_size = Vector2(0, 380)
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_content.add_child(_scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 6)
-	_scroll.add_child(list)
-	for group in Upgrades.ATTR_GROUPS:
-		list.add_child(UIKit.label(group, 14, a, true))
-		var grid := GridContainer.new()
-		grid.columns = 3
-		grid.add_theme_constant_override("h_separation", 8)
-		grid.add_theme_constant_override("v_separation", 8)
-		list.add_child(grid)
-		for id in Upgrades.ATTRS:
-			if Upgrades.ATTRS[id]["group"] == group:
-				grid.add_child(_attr_card(id, a))
-
-func _attr_card(id: String, a: Color) -> Control:
-	var level: int = profile.attr_level(id)
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(286, 0)
-	card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a if level > 0 else Color(1, 1, 1, 0.15), 4, 8))
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 3)
-	card.add_child(v)
-	var line := _row(v, 8)
-	var name := UIKit.label(str(Upgrades.ATTRS[id]["name"]).to_upper(), 14, UIKit.TEXT, true)
-	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.add_child(name)
-	line.add_child(UIKit.pips(level, Upgrades.ATTR_LEVEL_MAX, a))
-	var plus := _button(line, "+", _spend.bind(id), profile.points <= 0 or level >= Upgrades.ATTR_LEVEL_MAX or profile.attr_total() >= Upgrades.ATTR_TOTAL_MAX)
-	plus.custom_minimum_size = Vector2(34, 30)
-	var desc := UIKit.label(Upgrades.attr_text(id) + " per level", 11, UIKit.DIM)
-	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.custom_minimum_size = Vector2(250, 0)
-	v.add_child(desc)
-	return card
 
 func _fill_map() -> void:
 	_row().add_child(UIKit.label("MAP %d" % selected_seed, 44, UIKit.AMBER, true))

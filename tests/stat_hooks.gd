@@ -1,6 +1,7 @@
-# Run: Godot --headless --path <project> -s tests/attributes.gd   (exit code 1 on failure)
-# The character screen's 35 attributes: the data table, the caps (5 levels each, 15 points in all), attribute points
-# earned only by clearing every 5th round (with the screen message), and that every stat is really used by the game.
+# Run: Godot --headless --path <project> -s tests/stat_hooks.gd   (exit code 1 on failure)
+# Skill points earned only by clearing every 5th round (with the screen message, held to the point cap), and that every
+# stat the game reads from Profile.bonus does something in a raid. Stats are driven through Profile.stat_override (the
+# tree itself is covered by tests/skill_tree.gd); the stats the Offense tree grants are also checked through real nodes.
 extends SceneTree
 
 const ZoneData = preload("res://data/enemies.gd")
@@ -13,7 +14,7 @@ const Powerup = preload("res://scripts/powerup.gd")
 const Upgrades = preload("res://data/upgrades.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Tuning = preload("res://data/tuning.gd")
-const PATH := "user://test_attributes.json"
+const PATH := "user://test_stat_hooks.json"
 const FAR := Vector3(5000, 50, 5000)  # an empty corner of the world to shoot in
 
 var failures: PackedStringArray = []
@@ -28,7 +29,7 @@ func _init() -> void:
 	await _run()
 	for f in failures:
 		printerr(f)
-	print("attributes: %d failure(s)" % failures.size())
+	print("stat_hooks: %d failure(s)" % failures.size())
 	quit(1 if failures.size() > 0 else 0)
 
 func _frames(n: int) -> void:
@@ -40,10 +41,10 @@ func _clean() -> void:
 		DirAccess.remove_absolute(p)
 
 # A raid at `level` rounds down with every enemy and enemy base removed.
-func _raid(depth := 0, attrs := {}) -> Node:
+func _raid(depth := 0, nodes := []) -> Node:
 	_clean()
 	var prof := Profile.new(PATH)
-	prof.attrs = attrs
+	prof.allocated_nodes = nodes
 	prof.save()
 	Main.show_start = false
 	Main.depth = depth
@@ -94,96 +95,65 @@ func _shoot(main: Node, weapon: String, dist: float) -> int:
 	return dealt
 
 func _run() -> void:
-	# --- the table ---
-	_check(Upgrades.ATTRS.size() == 35, "the character screen should have 35 attributes, got %d" % Upgrades.ATTRS.size())
-	_check(Upgrades.ATTR_LEVEL_MAX == 5 and Upgrades.ATTR_TOTAL_MAX == 15 and Upgrades.ATTR_ROUNDS_PER_POINT == 5, "caps: 5 levels each, 15 points, a point every 5 rounds")
-	var used := {}
-	for id in Upgrades.ATTRS:
-		var at: Dictionary = Upgrades.ATTRS[id]
-		_check(Upgrades.ATTR_GROUPS.has(at["group"]) and not at["stats"].is_empty(), "%s needs a group and stats" % id)
-		for stat in at["stats"]:
-			_check(Upgrades.STATS.has(stat), "%s uses an unknown stat %s" % [id, stat])
-			used[stat] = true
-		var text := Upgrades.attr_text(id)
-		_check(text != "" and not text.contains("{"), "%s has no readable description: '%s'" % [id, text])
-	for stat in Upgrades.STATS:
-		_check(used.has(stat), "no attribute gives %s" % stat)
-	_check(Upgrades.attr_text("speed") == "+6% move speed" and Upgrades.attr_text("constitution") == "+10 max health, 4% less damage taken", "descriptions come from the numbers, got '%s' / '%s'" % [Upgrades.attr_text("speed"), Upgrades.attr_text("constitution")])
-
-	# --- the caps ---
-	var p := Profile.new(PATH)
-	p.points = 30
-	for id in ["marksman", "trigger", "handling", "steady"]:
-		for i in 7:
-			p.spend_point(id)
-	_check(p.attr_level("marksman") == 5 and p.attr_level("trigger") == 5 and p.attr_level("handling") == 5, "an attribute stops at 5 levels")
-	_check(p.attr_total() == 15 and p.attr_level("steady") == 0 and p.points == 15, "15 points can be spent in all, got %d spent, steady %d" % [p.attr_total(), p.attr_level("steady")])
-	_check(not p.grant_point() and p.points == 15, "no point is granted once points held and spent reach 15")
+	# --- the point cap and the Profile helpers ---
+	_check(Upgrades.ATTR_ROUNDS_PER_POINT == 5 and Tuning.SKILL_POINT_CAP == 24, "a point every 5 rounds, 24 held at most")
 	var q := Profile.new(PATH)
-	q.attrs = {"marksman": 5, "trigger": 5}
+	q.allocated_nodes = ["S1", "S2", "S3", "S4"]
 	var granted := 0
-	for i in 20:
+	for i in 40:
 		if q.grant_point():
 			granted += 1
-	_check(granted == 5 and q.points == 5, "10 spent leaves room for 5 more points, got %d" % granted)
-	_check(is_equal_approx(q.bonus("damage"), 0.2) and is_equal_approx(q.bonus("firerate"), 0.2) and q.bonus("reload") == 0.0, "bonus sums level x per-level")
-	q.attrs = {"speed": 2, "constitution": 3}
-	_check(is_equal_approx(q.bonus("speed"), 0.12) and is_equal_approx(q.bonus("hp"), 30.0) and is_equal_approx(q.bonus("armor"), 0.12), "constitution gives health and armor")
-	q.attrs = {"tinkerer": 3}
-	_check(q.repair_cost() == 2, "Tinkerer 3 cuts a repair to 2 scrap, got %d" % q.repair_cost())
-	q.attrs = {"tinkerer": 5}
-	_check(q.repair_cost() == 1, "a repair never costs less than 1 scrap")
-	var f := FileAccess.open(PATH, FileAccess.WRITE)
-	var over := {}
-	for id in Upgrades.ATTRS.keys().slice(0, 8):
-		over[id] = 5
-	f.store_string(JSON.stringify({"version": 2, "totals": {}, "attrs": over, "points": 0}))
-	f.close()
-	var r := Profile.new(PATH)
-	r.load_from_disk()
-	_check(r.attr_total() == 15, "a hand-edited save cannot spend more than 15 points, got %d" % r.attr_total())
+	_check(granted == 20 and q.unspent_points == 20, "4 allocated leaves room for 20 more points, got %d" % granted)
+	q.stat_override = {"repair_cost": 99}
+	_check(q.repair_cost() == 1, "an attachment repair never costs less than 1 scrap")
+	q.stat_override = {}
+	_check(q.bonus("crit") == 0.0 and q.bonus("regen") == 0.0, "a stat no node gives is 0")
+	q.stat_override = {"reload": 2.0}
+	_check(is_equal_approx(q.reload_mult(), 0.25), "a reload never gets under a quarter of its time")
+	q.stat_override = {}
 
 	# --- points come from clearing every 5th round ---
 	var main = await _raid(4)  # round 5
 	var raid = main.raid
 	var earned := [0]
 	raid.point_earned.connect(func(): earned[0] += 1)
-	_check(raid.round_number() == 5 and raid.profile.points == 0, "this is round 5 with no points yet")
+	_check(raid.round_number() == 5 and raid.profile.unspent_points == 0, "this is round 5 with no points yet")
 	await _frames(45)  # the raid checks twice a second by itself
-	_check(raid.round_cleared and raid.profile.points == 1 and raid.points_earned == 1 and earned[0] == 1, "clearing round 5 should earn one point, got %d" % raid.profile.points)
-	_check(main._banner.text.contains("NEW ATTRIBUTE POINT AT THE CHARACTER SCREEN") and main._banner_time > 0.0, "the screen should say a new attribute point is waiting, got '%s'" % main._banner.text)
+	_check(raid.round_cleared and raid.profile.unspent_points == 1 and raid.points_earned == 1 and earned[0] == 1, "clearing round 5 should earn one point, got %d" % raid.profile.unspent_points)
+	_check(main._banner.text.contains("NEW SKILL POINT AT THE CHARACTER STATION") and main._banner_time > 0.0, "the screen should say a new skill point is waiting, got '%s'" % main._banner.text)
 	var disk := Profile.new(PATH)
 	disk.load_from_disk()
-	_check(disk.points == 1, "the point is saved at once, so dying afterwards keeps it")
-	_check(not raid.check_round_clear() and raid.profile.points == 1, "a round pays its point once")
+	_check(disk.unspent_points == 1, "the point is saved at once, so dying afterwards keeps it")
+	_check(not raid.check_round_clear() and raid.profile.unspent_points == 1, "a round pays its point once")
 	main.queue_free()
 	await process_frame
 
 	main = await _raid(4)
 	raid = main.raid
 	var e = _grunt(main, Vector3(0, 0, -20))
-	_check(not raid.check_round_clear() and raid.profile.points == 0, "an enemy still alive: the round is not cleared")
+	_check(not raid.check_round_clear() and raid.profile.unspent_points == 0, "an enemy still alive: the round is not cleared")
 	e.free()
 	var base := Node3D.new()
 	base.add_to_group("spawner")
 	main.add_child(base)
 	_check(not raid.check_round_clear(), "an enemy base still standing: the round is not cleared")
 	base.free()
-	_check(raid.check_round_clear() and raid.profile.points == 1, "all enemies and bases gone: cleared")
+	_check(raid.check_round_clear() and raid.profile.unspent_points == 1, "all enemies and bases gone: cleared")
 	main.queue_free()
 	await process_frame
 
 	main = await _raid(3)  # round 4
-	_check(not main.raid.check_round_clear() and main.raid.profile.points == 0, "round 4 earns nothing")
+	_check(not main.raid.check_round_clear() and main.raid.profile.unspent_points == 0, "round 4 earns nothing")
 	main.queue_free()
 	await process_frame
 	main = await _raid(9)  # round 10
-	_check(main.raid.check_round_clear() and main.raid.profile.points == 1, "round 10 earns a point too: it repeats every 5 rounds")
+	_check(main.raid.check_round_clear() and main.raid.profile.unspent_points == 1, "round 10 earns a point too: it repeats every 5 rounds")
 	main.queue_free()
 	await process_frame
-	main = await _raid(4, {"marksman": 5, "trigger": 5, "handling": 5})
-	main.raid.profile.points = 0
-	_check(main.raid.check_round_clear() and main.raid.profile.points == 0 and main.raid.points_earned == 0, "at 15 spent no more points are granted")
+	main = await _raid(4)
+	main.raid.profile.allocated_nodes = ["S1", "S2"]
+	main.raid.profile.unspent_points = Tuning.SKILL_POINT_CAP - 2
+	_check(main.raid.check_round_clear() and main.raid.profile.unspent_points == Tuning.SKILL_POINT_CAP - 2 and main.raid.points_earned == 0, "at the cap no more points are granted")
 	main.queue_free()
 	await process_frame
 
@@ -196,20 +166,20 @@ func _run() -> void:
 	_arena(main)
 
 	_check(await _shoot(main, "pistol", 10.0) == 25, "a bare pistol hits for 25")
-	prof.attrs = {"marksman": 5}
+	prof.stat_override = {"damage": 0.2}
 	raid._apply_upgrades()
 	_check(await _shoot(main, "pistol", 10.0) == 30, "Marksman 5: +20% damage makes a pistol hit 30")
-	prof.attrs = {"sidearm": 5}
+	prof.stat_override = {"dmg_pistol": 0.4}
 	raid._apply_upgrades()
 	_check(await _shoot(main, "pistol", 10.0) == 35, "Sidearm training 5: +40% for the pistol")
-	prof.attrs = {"longgun": 5}
+	prof.stat_override = {"dmg_sniper": 0.4}
 	raid._apply_upgrades()
 	_check(await _shoot(main, "pistol", 10.0) == 25, "Long gun training does nothing for the pistol")
 	_check(await _shoot(main, "sniper", 10.0) == 140, "Long gun training 5: +40% for the sniper")
-	prof.attrs = {"ambush": 2}
+	prof.stat_override = {"dmg_unaware": 0.2}
 	raid._apply_upgrades()
 	_check(await _shoot(main, "pistol", 10.0) == 30, "Ambusher 2: +20% against an enemy that has not noticed you")
-	prof.attrs = {"longshot": 5}
+	prof.stat_override = {"range": 0.3}
 	raid._apply_upgrades()
 	var far: Dictionary = WeaponData.DATA["pistol"].duplicate()
 	far["effective"] = 25.0 * 1.3
@@ -219,10 +189,10 @@ func _run() -> void:
 	_check(longer > plain, "the test distance should sit in the falloff band (%d vs %d)" % [plain, longer])
 	_check(await _shoot(main, "pistol", 40.0) == longer, "Long shot 5: +30%% range, the pistol should hit for %d at 40 m" % longer)
 
-	prof.attrs = {}
+	prof.stat_override = {}
 	raid._apply_upgrades()
 	var cd0: float = raid.cooldown_mult
-	prof.attrs = {"trigger": 5}
+	prof.stat_override = {"firerate": 0.2}
 	raid._apply_upgrades()
 	_check(is_equal_approx(cd0, 1.0) and is_equal_approx(raid.cooldown_mult, 0.8), "Trigger discipline 5 shortens the wait between shots by 20%%, got %s" % raid.cooldown_mult)
 
@@ -230,19 +200,19 @@ func _run() -> void:
 	var tight := 0
 	var loose := 0
 	for s in range(1, 30):
-		prof.attrs = {}
+		prof.stat_override = {}
 		raid._apply_upgrades()
 		seed(s)
 		loose = await _shoot(main, "scattergun", 9.0)
 		if loose < 112:
-			prof.attrs = {"steady": 5}
+			prof.stat_override = {"spread": 0.6}
 			seed(s)
 			tight = await _shoot(main, "scattergun", 9.0)
 			break
 	_check(loose < 112 and tight == 112, "Steady hands 5 should land all 8 pellets that spread out otherwise (%d vs %d)" % [tight, loose])
 
 	# Chances use their own seeded stream: the same seed gives the same shots, which a test can mirror.
-	prof.attrs = {"lethal": 5}
+	prof.stat_override = {"crit": 0.2}
 	raid._apply_upgrades()
 	var crit_seed := 1
 	var expect := 0
@@ -262,7 +232,7 @@ func _run() -> void:
 		dealt += await _shoot(main, "pistol", 10.0)
 	_check(dealt == expect, "Lethal 5: 20%% of shots do double, expected %d got %d" % [expect, dealt])
 
-	prof.attrs = {"thrifty": 5}
+	prof.stat_override = {"ammo_save": 0.2}
 	raid._apply_upgrades()
 	var spent0: int = raid.ammo_spent
 	var ammo0: int = player.inventory.count("ammo")
@@ -280,7 +250,7 @@ func _run() -> void:
 	_check(paid < 10 and raid.ammo_spent - spent0 == paid and ammo0 - player.inventory.count("ammo") == paid, "Thrifty 5: 20%% of shots cost nothing, expected %d rounds spent, got %d" % [paid, raid.ammo_spent - spent0])
 
 	# Attachment wear: Careful hands skips some of it.
-	prof.attrs = {"careful": 5}
+	prof.stat_override = {"att_wear": 0.4}
 	prof.attached = {"pistol": "att_heavy_barrel"}
 	raid.att_left = {"att_heavy_barrel": 100}
 	raid._apply_upgrades()
@@ -298,7 +268,7 @@ func _run() -> void:
 	prof.attached = {}
 	raid.att_left = {}
 
-	prof.attrs = {"eagle": 5}
+	prof.stat_override = {"zoom": 0.3}
 	_check(is_equal_approx(raid.fov_mult("pistol"), 0.7) and is_equal_approx(raid.zoom_mult("pistol"), 1.0), "Eagle eye 5: the zoomed view is 30%% tighter, got %s" % raid.fov_mult("pistol"))
 	player.select_weapon("pistol")
 	player.zoom_input_test = true
@@ -307,7 +277,7 @@ func _run() -> void:
 	player.zoom_input_test = false
 	player._update_zoom(10.0)
 
-	prof.attrs = {"magazine": 5}
+	prof.stat_override = {"clip": 0.5}
 	_check(raid.clip_size("pistol") == 21 and raid.clip_size("sniper") == 8, "Extended mags 5: +50%% magazine, pistol %d sniper %d" % [raid.clip_size("pistol"), raid.clip_size("sniper")])
 	player.inventory.add("ammo", 40)
 	raid.loaded["pistol"] = 0
@@ -316,7 +286,7 @@ func _run() -> void:
 	await _frames(3)
 	_check(raid.loaded["pistol"] == 21, "a reload fills the bigger magazine, got %d" % raid.loaded["pistol"])
 
-	prof.attrs = {"regen": 5}
+	prof.stat_override = {"regen": 1.5}
 	player.health = 10
 	for i in 4:
 		raid._regen(0.25)
@@ -325,7 +295,7 @@ func _run() -> void:
 		raid._regen(0.25)
 	_check(player.health == 13, "and 3 after two, got %d" % player.health)
 
-	prof.attrs = {"bloodlust": 5}
+	prof.stat_override = {"kill_heal": 7.5}
 	player.health = 50
 	var hp_target = _grunt(main, FAR + Vector3(0, 0, -10))
 	hp_target.health = 25
@@ -336,16 +306,16 @@ func _run() -> void:
 	raid.request_fire("pistol", player._cam.global_transform)
 	_check(player.health == 58, "Bloodlust 5: a kill heals 8, got %d" % player.health)
 
-	prof.attrs = {"study": 5}
+	prof.stat_override = {"xp_gain": 0.3}
 	raid.xp = 0
 	for i in 9:
 		raid.add_xp(1)
 	_check(raid.xp == 11, "Quick study 5: 9 orbs give 11 xp, got %d" % raid.xp)
 
-	prof.attrs = {"quickexit": 5}
+	prof.stat_override = {"extract_speed": 0.25}
 	_check(is_equal_approx(raid.hold_seconds_for("A"), raid.hold_seconds * 0.75) and is_equal_approx(raid.hold_seconds_for("B"), raid.hold_seconds * 0.75 * raid.b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS), "Quick exit 5: 25%% shorter holds")
 
-	prof.attrs = {"lasting": 5}
+	prof.stat_override = {"powerup_time": 0.5}
 	var pw := Powerup.new()
 	pw.id = "haste"
 	main.add_child(pw)
@@ -358,8 +328,8 @@ func _run() -> void:
 	# Drop rates: the same kills drop more with the attribute. Ammo (the same random numbers each time):
 	var stats := {"drop_chance": 0.5, "drop": [1, 1]}
 	var counts := []
-	for attrs in [{}, {"scavenger": 5}]:
-		prof.attrs = attrs
+	for attrs in [{}, {"ammo_drop": 0.5}]:
+		prof.stat_override = attrs
 		raid._drop_rng.seed = 5
 		var n := 0
 		for i in 200:
@@ -370,8 +340,8 @@ func _run() -> void:
 	# Scrap, attachments and powerups:
 	var scrap_stats := {"health": 1, "speed": 0, "damage": 0, "scrap_chance": 0.35, "scrap": [1, 1]}
 	var results := []
-	for attrs in [{}, {"salvage": 5, "prospector": 5, "lucky": 5}]:
-		prof.attrs = attrs
+	for attrs in [{}, {"scrap_find": 0.5, "att_find": 1.0, "powerup_find": 0.4}]:
+		prof.stat_override = attrs
 		for n in main.get_children():
 			if n.is_in_group("powerup") or ("qty" in n and "id" in n) or n.is_in_group("xp"):
 				n.free()
@@ -397,7 +367,7 @@ func _run() -> void:
 			n.free()
 
 	# --- on the player ---
-	prof.attrs = {"sprint": 5, "jump": 5, "ghost": 5, "dodge": 5, "laststand": 5, "medic": 5, "speed": 0}
+	prof.stat_override = {"sprint_speed": 0.3, "jump_height": 0.3, "stealth": 0.3, "dodge": 0.1, "last_stand": 0.3, "heal_mult": 0.5}
 	player.apply_profile(prof)
 	_check(is_equal_approx(player.sprint_mult, 1.3) and is_equal_approx(player.jump_mult, 1.3) and is_equal_approx(player.stealth, 0.3), "sprint, jump and stealth carry into the raid")
 	_check(is_equal_approx(player.dodge, 0.1) and is_equal_approx(player.last_stand, 0.3) and is_equal_approx(player.heal_mult, 1.5), "dodge, last stand and medic carry into the raid")
@@ -436,8 +406,10 @@ func _run() -> void:
 	# Sprint and jump speed in the real movement code (keys pressed through the input system).
 	main.queue_free()
 	await process_frame
-	main = await _raid(0, {"sprint": 5, "jump": 5})
+	main = await _raid(0)
 	player = main._player
+	main.profile.stat_override = {"sprint_speed": 0.3, "jump_height": 0.3}
+	player.apply_profile(main.profile)
 	player.set_physics_process(true)
 	await _frames(30)  # settle on the floor
 	Input.parse_input_event(_key(KEY_W, true))
@@ -459,13 +431,19 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 
-	# A new raid: Quartermaster adds starting ammo.
+	# The Offense tree's own stats, through real nodes: starting ammo (Deep Pockets), health and speed, and E reach.
 	main = await _raid(0)
 	var plain_ammo: int = main.raid.start_ammo
+	var plain_hp: int = main._player.max_health
+	var plain_reach: float = main._player.loot_reach
 	main.queue_free()
 	await process_frame
-	main = await _raid(0, {"quartermaster": 5})
-	_check(main.raid.start_ammo == plain_ammo + 30, "Quartermaster 5: +30 starting ammo, got %d vs %d" % [main.raid.start_ammo, plain_ammo])
+	main = await _raid(0, ["I1", "I2", "I3", "I4", "T1", "T2", "GO", "O1", "O2", "S1", "S2", "D1"])
+	_check(main.raid.start_ammo == plain_ammo + 4, "Deep Pockets: +4 starting ammo, got %d vs %d" % [main.raid.start_ammo, plain_ammo])
+	_check(main._player.max_health == plain_hp + 8, "two Strength nodes: +8 max health, got %d vs %d" % [main._player.max_health, plain_hp])
+	_check(is_equal_approx(main._player.loot_reach, plain_reach + 1.0), "four Intelligence nodes: E reaches 1 m further, got %s" % main._player.loot_reach)
+	_check(is_equal_approx(main._player.speed_mult, 1.006), "one Dexterity node: +0.6%% move speed, got %s" % main._player.speed_mult)
+	_check(is_equal_approx(main.raid.hold_seconds_for("A"), main.raid.hold_seconds * 0.96), "four Intelligence nodes: a 4%% shorter extract hold")
 	main.queue_free()
 	await process_frame
 	_clean()

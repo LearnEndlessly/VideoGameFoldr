@@ -187,7 +187,7 @@ func _run() -> void:
 	_check(main.raid.upgrades.is_empty(), "a fresh run starts without upgrades")
 	var profile := Profile.new(PATH)
 	profile.load_from_disk()
-	_check(not "weapons" in profile and profile.attrs.is_empty(), "upgrades must not leak into the profile")
+	_check(not "weapons" in profile and profile.allocated_nodes.is_empty(), "upgrades must not leak into the profile")
 	main.queue_free()
 	await process_frame
 
