@@ -41,7 +41,7 @@ static func next_text(id: String, level: int) -> String:
 		return "+%d%s" % [int(round(float(u["hp"]) * f)), u["unit"]]
 	return "+%d%s" % [int(round(float(u["per_level"]) * f * 100.0)), u["unit"]]
 
-# 2. SKILL POINTS are earned by clearing a round (kill every enemy and destroy every enemy base on round 5, 10, 15 ...), one
+# 2. SKILL POINTS are earned by clearing a round (kill every enemy and destroy every enemy base on every round), one
 #    point each, held to Tuning.SKILL_POINT_CAP, and spent in the skill tree (data/skill_nodes.gd). The tree's stats are
 #    resolved by scripts/skill_stats.gd; Profile.bonus(stat) is what the game reads.
-const ATTR_ROUNDS_PER_POINT := 5
+const ATTR_ROUNDS_PER_POINT := 1

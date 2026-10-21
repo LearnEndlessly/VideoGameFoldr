@@ -1,5 +1,5 @@
 # Run: Godot --headless --path <project> -s tests/stat_hooks.gd   (exit code 1 on failure)
-# Skill points earned only by clearing every 5th round (with the screen message, held to the point cap), and that every
+# Skill points earned only by clearing a round (with the screen message, held to the point cap), and that every
 # stat the game reads from Profile.bonus does something in a raid. Stats are driven through Profile.stat_override (the
 # tree itself is covered by tests/skill_tree.gd); the stats the Offense tree grants are also checked through real nodes.
 extends SceneTree
@@ -96,7 +96,7 @@ func _shoot(main: Node, weapon: String, dist: float) -> int:
 
 func _run() -> void:
 	# --- the point cap and the Profile helpers ---
-	_check(Upgrades.ATTR_ROUNDS_PER_POINT == 5 and Tuning.SKILL_POINT_CAP == 24, "a point every 5 rounds, 24 held at most")
+	_check(Upgrades.ATTR_ROUNDS_PER_POINT == 1 and Tuning.SKILL_POINT_CAP == 24, "a point every round, 24 held at most")
 	var q := Profile.new(PATH)
 	q.allocated_nodes = ["S1", "S2", "S3", "S4"]
 	var granted := 0
@@ -112,7 +112,7 @@ func _run() -> void:
 	_check(is_equal_approx(q.reload_mult(), 0.25), "a reload never gets under a quarter of its time")
 	q.stat_override = {}
 
-	# --- points come from clearing every 5th round ---
+	# --- points come from clearing a round ---
 	var main = await _raid(4)  # round 5
 	var raid = main.raid
 	var earned := [0]
@@ -143,11 +143,11 @@ func _run() -> void:
 	await process_frame
 
 	main = await _raid(3)  # round 4
-	_check(not main.raid.check_round_clear() and main.raid.profile.unspent_points == 0, "round 4 earns nothing")
+	_check(main.raid.check_round_clear() and main.raid.profile.unspent_points == 1, "round 4 earns a point too")
 	main.queue_free()
 	await process_frame
 	main = await _raid(9)  # round 10
-	_check(main.raid.check_round_clear() and main.raid.profile.unspent_points == 1, "round 10 earns a point too: it repeats every 5 rounds")
+	_check(main.raid.check_round_clear() and main.raid.profile.unspent_points == 1, "round 10 earns a point too: it repeats every round")
 	main.queue_free()
 	await process_frame
 	main = await _raid(4)

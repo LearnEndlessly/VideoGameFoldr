@@ -594,7 +594,7 @@ func end_combo() -> void:
 func round_number() -> int:
 	return depth + 1
 
-# Every ATTR_ROUNDS_PER_POINT rounds, once no enemy and no enemy base is left alive the round is cleared and the
+# Every ATTR_ROUNDS_PER_POINT rounds (1 = every round), once no enemy and no enemy base is left alive the round is cleared and the
 # player earns an attribute point (saved at once, so dying afterwards keeps it). True the moment that happens.
 func check_round_clear() -> bool:
 	if state != State.ACTIVE or round_cleared or round_number() % Upgrades.ATTR_ROUNDS_PER_POINT != 0:

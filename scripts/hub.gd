@@ -705,7 +705,7 @@ func _fill_character() -> void:
 	cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(cap)
 	cap.add_child(UIKit.label("SKILL POINTS", 18, UIKit.TEXT, true))
-	var how := UIKit.label("A point for every %d rounds cleared (kill every enemy, destroy every enemy base). The skill tree screen is the next step; until it is built the points wait here." % Upgrades.ATTR_ROUNDS_PER_POINT, 12, UIKit.DIM)
+	var how := UIKit.label("A point for every round cleared (kill every enemy, destroy every enemy base). The skill tree screen is the next step; until it is built the points wait here.", 12, UIKit.DIM)
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(430, 0)
 	cap.add_child(how)

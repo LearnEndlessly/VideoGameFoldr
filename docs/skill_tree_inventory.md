@@ -27,7 +27,7 @@ Other readers: `hub.gd:716-718` (the Character station tiles: spent, health, arm
 
 ## How points are earned and saved today (differs from the brief)
 
-- **Points come from clearing a round, not from extracting.** `raid.gd:597-608`: on every 5th round (`ATTR_ROUNDS_PER_POINT`), once every enemy and every enemy base is dead, `profile.grant_point()` adds one point. It is saved at once, so dying afterwards keeps it. The end screen only reports `points_earned`.
+- **Points come from clearing a round, not from extracting.** `raid.gd:597-608`: every round (`ATTR_ROUNDS_PER_POINT` is 1; it was 5 until the owner changed it), once every enemy and every enemy base is dead, `profile.grant_point()` adds one point. It is saved at once, so dying afterwards keeps it. The end screen only reports `points_earned`.
 - **Hard cap of 15** (`ATTR_TOTAL_MAX`): unspent + spent can never exceed it, and `grant_point()` refuses beyond it. `ATTR_LEVEL_MAX` is 5 per attribute.
 - Saved in `profile.json` (`Tuning.PROFILE_PATH`), **version 2**, atomic write via `.tmp` + rename. Fields: `attrs` (id -> level), `points` (unspent). `load_from_disk` clamps levels and trims a hand-edited save to the cap.
 - `RESET_ON_LAUNCH` wipes the real profile at launch in a real run (README), so a player's points currently do not survive a restart. Tests use scratch profiles.
