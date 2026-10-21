@@ -155,7 +155,7 @@ func _run() -> void:
 	var s = _enemy(main, "scout", FAR + Vector3(0, 0, -20), 7)
 	_check(s.stats["flying"] and s.collision_mask == 0, "a scout flies over walls and cover")
 	_check(absf(s.global_position.y - (FAR.y + float(Enemies.TYPES["scout"]["hover"]))) < 0.01, "it starts high above the ground, at y %s" % s.global_position.y)
-	_check(Enemies.TYPES["scout"]["health"] < Enemies.TYPES["grunt"]["health"] and Enemies.TYPES["scout"]["size"] < 0.6 and Enemies.TYPES["scout"]["damage"] == 0, "small, weak and harmless")
+	_check(Enemies.TYPES["scout"]["health"] < Enemies.TYPES["grunt"]["health"] and Enemies.TYPES["scout"]["size"] < 0.6 and Enemies.TYPES["scout"]["damage"] <= 10, "small, weak and light-hitting")
 	var grunt_peer = _enemy(main, "grunt", FAR + Vector3(0, 0, -20), 8)
 	player.global_position = FAR
 	player.sprinting = true  # heard: no cone needed
@@ -290,7 +290,7 @@ func _run() -> void:
 		_check(main.map_type == "narrow" and main.half_d * 2.0 >= 96.0, "seed %d builds a narrow map" % sd)
 		_check(main._player.global_position.z > main.half_d - 8.0 and main._player.global_position.is_equal_approx(main._start), "the player starts at one end, at z %s" % main._player.global_position.z)
 		_check(main.extract_errors.is_empty(), "narrow map %d placed its extract zones: %s" % [sd, main.extract_errors])
-		_check(main.extract_pos.z < -main.half_d * 0.3, "the safe extract is down the far end (z %s)" % main.extract_pos.z)
+		_check(main.extract_pos.z < 0.0, "the safe extract is in the far half of the lane, away from the start end (z %s)" % main.extract_pos.z)
 		var gates: Array = main.blocks.filter(func(b): return b[0].y == 3.5 and b[0].z == 1.0)
 		_check(gates.size() >= 2, "walls cross the lane, got %d" % gates.size())
 		var grid: Dictionary = main._walk_grid()

@@ -1,12 +1,20 @@
 # Skill tree nodes, one row per node. Tune the tree by editing rows, never code (thresholds and caps are in data/tuning.gd).
 # id, tree, kind (attribute | trunk | minor | notable | gateway), name, pos (x, y screen units, y grows down), links (undirected:
 # a link listed on either row counts), requires {attribute: total needed}, effects [{stat, mod "flat" | "increased", value}].
-# Stat names are those of data/upgrades.gd STATS (positive is better: reload 0.05 = 5% faster); loot_reach is metres of E reach.
+# Stat names are those of data/upgrades.gd STATS (positive is better: reload 0.05 = 5% faster); loot_reach is metres of E reach, xp_range metres of XP pull, pellets extra bullets per shot, xp_gain a fraction of bonus XP.
 # "attr" on an attribute node says which of ATTRS it adds one of. The hub is not a row: HUB_LINKS are the nodes it touches.
 const HUB := "hub"
 const HUB_LINKS := ["S1", "D1", "I1", "T1"]
 const HUB_POS := Vector2(0, 0)
 const ATTRS := ["str", "dex", "int"]
+# How the screen words a stat: "name" after the number, "unit" after a flat number. "increased" effects show as a percentage.
+const STAT_NAMES := {
+	"hp": {"name": "max health"}, "speed": {"name": "move speed"}, "reload": {"name": "reload speed"}, "spread": {"name": "accuracy"},
+	"range": {"name": "weapon range"}, "damage": {"name": "damage"}, "dmg_pistol": {"name": "pistol damage"},
+	"dmg_scattergun": {"name": "scattergun damage"}, "ammo_save": {"name": "chance a shot costs no ammo"}, "ammo_drop": {"name": "ammo drops"},
+	"start_ammo": {"name": "starting ammo"}, "extract_speed": {"name": "extraction speed"}, "loot_reach": {"name": "loot reach", "unit": " m"},
+	"pellets": {"name": "bullets per shot"}, "xp_gain": {"name": "XP gained"}, "xp_range": {"name": "XP pull range", "unit": " m"},
+}
 const NODES := [
 	{"id": "S1", "tree": "spoke", "kind": "attribute", "attr": "str", "name": "Strength 1", "pos": Vector2(-1.5, 0), "links": ["S2"], "requires": {}, "effects": [{"stat": "hp", "mod": "flat", "value": 4.0}]},
 	{"id": "S2", "tree": "spoke", "kind": "attribute", "attr": "str", "name": "Strength 2", "pos": Vector2(-3, 0), "links": ["S1", "S3"], "requires": {}, "effects": [{"stat": "hp", "mod": "flat", "value": 4.0}]},
@@ -44,6 +52,8 @@ const NODES := [
 	{"id": "BN1", "tree": "brutality", "kind": "notable", "name": "Point Blank", "pos": Vector2(-6.5, -3.5), "links": ["B2"], "requires": {"str": 6}, "effects": [{"stat": "dmg_scattergun", "mod": "increased", "value": 0.30}, {"stat": "range", "mod": "increased", "value": -0.15}]},
 	# Now I would fire deliberate shots and reload only behind cover instead of topping up the clip mid-fight.
 	{"id": "BN2", "tree": "brutality", "kind": "notable", "name": "Hammer Blow", "pos": Vector2(-6, -9), "links": ["B3"], "requires": {"str": 6}, "effects": [{"stat": "damage", "mod": "increased", "value": 0.12}, {"stat": "reload", "mod": "increased", "value": -0.15}]},
+	# Now I would spray the pistol as a two-bullet burst and the scattergun as a wider cloud instead of lining up one clean shot.
+	{"id": "BN3", "tree": "brutality", "kind": "notable", "name": "Split Shot", "pos": Vector2(-7.5, -7.5), "links": ["B4"], "requires": {"str": 6}, "effects": [{"stat": "pellets", "mod": "flat", "value": 1.0}, {"stat": "damage", "mod": "increased", "value": -0.30}]},
 	# Marksmanship (DEX): pistol range, spread, reload
 	{"id": "GM", "tree": "marksmanship", "kind": "gateway", "name": "Steady Aim", "pos": Vector2(0, -4.5), "links": ["T2", "M1"], "requires": {"dex": 4}, "effects": [{"stat": "spread", "mod": "increased", "value": 0.08}]},
 	{"id": "M1", "tree": "marksmanship", "kind": "minor", "name": "Sight Picture", "pos": Vector2(0, -6), "links": ["GM", "M2", "M3"], "requires": {}, "effects": [{"stat": "range", "mod": "increased", "value": 0.05}]},
@@ -64,4 +74,9 @@ const NODES := [
 	{"id": "ON1", "tree": "ordnance", "kind": "notable", "name": "Hoarder", "pos": Vector2(6.5, -3.5), "links": ["O2"], "requires": {"int": 6}, "effects": [{"stat": "start_ammo", "mod": "flat", "value": 14.0}, {"stat": "ammo_save", "mod": "increased", "value": 0.06}]},
 	# Now I would stay and fight the grunts for their drops instead of heading for the exit early.
 	{"id": "ON2", "tree": "ordnance", "kind": "notable", "name": "Salvage Run", "pos": Vector2(6, -9), "links": ["O3"], "requires": {"int": 6}, "effects": [{"stat": "ammo_drop", "mod": "increased", "value": 0.35}, {"stat": "extract_speed", "mod": "increased", "value": -0.10}]},
+	# Learning (INT): XP gain and how far orbs are pulled in
+	{"id": "OX1", "tree": "ordnance", "kind": "minor", "name": "Quick Study", "pos": Vector2(7.5, -5.5), "links": ["O4", "OX2", "ON3"], "requires": {}, "effects": [{"stat": "xp_gain", "mod": "increased", "value": 0.08}]},
+	{"id": "OX2", "tree": "ordnance", "kind": "minor", "name": "Magnet", "pos": Vector2(7.5, -7.5), "links": ["O4", "OX1", "ON3"], "requires": {}, "effects": [{"stat": "xp_range", "mod": "flat", "value": 1.5}]},
+	# Now I would wade into the middle of a fight to scoop up every orb instead of hanging back at the edge.
+	{"id": "ON3", "tree": "ordnance", "kind": "notable", "name": "Scholar's Mind", "pos": Vector2(9, -6.5), "links": ["OX1", "OX2"], "requires": {"int": 6}, "effects": [{"stat": "xp_gain", "mod": "increased", "value": 0.30}, {"stat": "xp_range", "mod": "flat", "value": 3.0}, {"stat": "speed", "mod": "increased", "value": -0.04}]},
 ]

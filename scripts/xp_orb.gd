@@ -36,5 +36,5 @@ func _physics_process(delta: float) -> void:
 	_orb.position.y = 0.5 + sin(_age * 3.0) * 0.08
 	for p in get_tree().get_nodes_in_group("player"):
 		var to: Vector3 = p.global_position + Vector3(0, 0.8, 0) - global_position
-		if to.length() < Tuning.XP_MAGNET_RADIUS:
+		if to.length() < (p.raid.xp_magnet_radius() if p.raid != null else Tuning.XP_MAGNET_RADIUS):
 			global_position += to.normalized() * minf(Tuning.XP_MAGNET_SPEED * delta, to.length())

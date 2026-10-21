@@ -17,6 +17,7 @@ const ALERT_COLOR := Color(1.0, 0.9, 0.1)
 
 var stats := {}  # set by the spawner from data/enemies.gd before add_child
 var home := Vector3.ZERO
+var patrol_radius := PATROL_RADIUS  # how far from home it wanders (a base's garrison stays tight)
 var group_id := 0
 var health := 1
 var max_health := 1
@@ -29,6 +30,7 @@ var converge_target := Vector3.ZERO
 
 var _attack_cd := 0.0
 var _shot_cd := 2.0  # seconds until a ranged enemy may fire
+var _volley := 0  # which of the ranged patterns fires next
 var _hover_y := 0.0  # the height a flyer holds
 var _ping := 0.0  # seconds until a scout next raises the alarm
 var _lost_timer := 0.0
@@ -296,7 +298,7 @@ func _physics_process(delta: float) -> void:
 		to_target.y = 0.0
 		if _repick <= 0.0 or to_target.length() < 1.0:
 			_repick = randf_range(3.0, 6.0)
-			_target = home + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * PATROL_RADIUS
+			_target = home + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * patrol_radius
 		else:
 			_walk(to_target, float(stats["speed"]) * PATROL_SPEED)
 
@@ -318,7 +320,7 @@ func _hears(player, dist: float) -> bool:
 	return player.sprinting and dist < Tuning.SPRINT_NOISE_RANGE
 
 func _sees(player, dist: float) -> bool:
-	if dist >= Tuning.ENEMY_SIGHT_RANGE:
+	if dist >= float(stats.get("sight", Tuning.ENEMY_SIGHT_RANGE)):  # a scout looks down from high up and sees far
 		return false
 	var to_player: Vector3 = player.global_position - global_position
 	to_player.y = 0.0
@@ -499,7 +501,8 @@ func raise_alarm(player_pos: Vector3) -> void:
 
 # --- ranged attack (the super brute) ---
 
-# Fires a slow projectile straight at where the player is now, when one is in range, in the open, and the gun is ready.
+# Fires at where the player is now, when one is in range, in the open, and the gun is ready: one slow projectile, or (with
+# "patterns") the next volley in turn, every shot parallel so the volley keeps its shape. Shots fly straight and can be dodged.
 func _try_shoot(delta: float, player, dist: float) -> void:
 	var r: Dictionary = stats.get("ranged", {})
 	if r.is_empty():
@@ -509,11 +512,20 @@ func _try_shoot(delta: float, player, dist: float) -> void:
 		return
 	_shot_cd = float(r["cooldown"])
 	var origin := global_position + Vector3(0, 1.5 * float(stats["size"]), 0)
-	var p := Projectile.new()
-	p.direction = (player.global_position + Vector3(0, 1.2, 0) - origin).normalized()
-	p.speed = float(r["speed"])
-	p.damage = int(round(float(stats["damage"]) * float(r["damage_mult"])))
-	p.radius = float(r["radius"])
-	p.position = origin
-	get_parent().add_child(p)
+	var dir: Vector3 = (player.global_position + Vector3(0, 1.2, 0) - origin).normalized()
+	var offsets: Array = [Vector2.ZERO]
+	if r.has("patterns"):
+		offsets = r["patterns"][_volley % r["patterns"].size()]["offsets"]
+		_volley += 1
+	var right: Vector3 = dir.cross(Vector3.UP).normalized()
+	var up: Vector3 = right.cross(dir).normalized()
+	for o in offsets:
+		var p := Projectile.new()
+		p.direction = dir
+		p.speed = float(r["speed"])
+		p.damage = int(round(float(stats["damage"]) * float(r["damage_mult"])))
+		p.radius = float(r["radius"])
+		p.color = r.get("color", p.color)
+		p.position = origin + right * o.x + up * o.y
+		get_parent().add_child(p)
 	Sfx.play("enemy_strike", global_position)

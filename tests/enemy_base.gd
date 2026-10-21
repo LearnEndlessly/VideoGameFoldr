@@ -125,8 +125,21 @@ func _run() -> void:
 
 	# Group size: 3 groups of ENEMY_GROUP_SIZE_MIN..MAX at the start.
 	main = await _new_raid(5, true)
-	var count := main.get_children().filter(func(c): return "stats" in c).size()
+	var count := main.get_children().filter(func(c): return "stats" in c and c.group_id < Tuning.ENEMY_GROUP_COUNT).size()
 	_check(count >= 3 * Tuning.ENEMY_GROUP_SIZE_MIN and count <= 3 * Tuning.ENEMY_GROUP_SIZE_MAX, "%d enemies at the start" % count)
+
+	# Garrisons: every base starts with SPAWNER_GARRISON_MIN..MAX defenders standing close around it, in its own group.
+	for sp0 in main._spawners:
+		var gar := get_nodes_in_group("pack_%d" % sp0.group_id)
+		_check(gar.size() >= Tuning.SPAWNER_GARRISON_MIN and gar.size() <= Tuning.SPAWNER_GARRISON_MAX, "base %d garrison was %d" % [sp0.group_id, gar.size()])
+		_check(gar.all(func(e): return e.home == sp0.position and Vector2(e.position.x - sp0.position.x, e.position.z - sp0.position.z).length() <= Tuning.SPAWNER_CLUSTER_MAX + Tuning.SPAWNER_PATROL_RADIUS * 1.5), "the garrison stays within %s m of its base" % (Tuning.SPAWNER_CLUSTER_MAX + Tuning.SPAWNER_PATROL_RADIUS * 1.5))
+	for i in main._spawners.size():
+		for j in range(i + 1, main._spawners.size()):
+			var d: float = Vector2(main._spawners[i].position.x - main._spawners[j].position.x, main._spawners[i].position.z - main._spawners[j].position.z).length()
+			_check(d >= Tuning.SPAWNER_NARROW_SEPARATION or main.map_type == "narrow", "bases %d and %d are only %.1f m apart" % [i, j, d])
+	for sp0 in main._spawners:  # start every base from an empty group so the spawn counts below are its own
+		for e in get_nodes_in_group("pack_%d" % sp0.group_id):
+			e.free()
 
 	# Beacon: the red beam narrows as the countdown runs, and is wide again right after a spawn.
 	var b = main._spawners[1]

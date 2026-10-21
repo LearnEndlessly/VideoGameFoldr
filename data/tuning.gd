@@ -19,6 +19,16 @@ const SPAWNER_HEALTH := 100
 const SPAWNER_INTERVAL := 12.0
 const SPAWNER_MAX_ALIVE := 3
 const SPAWNER_MIN_ORIGIN := 25.0
+# Bases keep at least SPAWNER_MIN_SEPARATION m from each other (best effort: a map too small to fit them accepts the last try).
+# Each base starts with a garrison of SPAWNER_GARRISON_MIN..MAX enemies standing SPAWNER_CLUSTER_MIN..MAX m around it, and
+# they patrol only SPAWNER_PATROL_RADIUS m from it.
+const SPAWNER_MIN_SEPARATION := 40.0
+const SPAWNER_NARROW_SEPARATION := 20.0  # a narrow lane cannot hold bases 40 m apart and still leave room for the extract zones
+const SPAWNER_GARRISON_MIN := 4
+const SPAWNER_GARRISON_MAX := 6
+const SPAWNER_CLUSTER_MIN := 2.5
+const SPAWNER_CLUSTER_MAX := 5.0
+const SPAWNER_PATROL_RADIUS := 5.0
 
 # Threat clock: THREAT_DELAY_SECONDS into a raid, every group stops patrolling and heads
 # for the player's position, with a HUD warning. They still need to see you to attack, and
@@ -40,14 +50,15 @@ const THREAT_TICK_RADIUS := 110.0
 # Placement attempts per object before overlapping other objects is accepted.
 const SPAWN_TRIES := 200
 
-# Map shape: the floor area is MAP_AREA m2, split into a width and depth by a random
+# Map shape: the floor area is MAP_AREA_PER_BASE m2 for every enemy base the raid will have (at least MAP_AREA), split into a width and depth by a random
 # aspect ratio between MAP_ASPECT_MIN and MAP_ASPECT_MAX (below 1 = taller than wide),
 # each side then clamped to [MAP_MIN_SIDE, MAP_MAX_SIDE].
 const MAP_AREA := 3600.0
+const MAP_AREA_PER_BASE := 1800.0
 const MAP_ASPECT_MIN := 0.5
 const MAP_ASPECT_MAX := 2.0
 const MAP_MIN_SIDE := 44.0
-const MAP_MAX_SIDE := 100.0
+const MAP_MAX_SIDE := 160.0
 # Map types, picked per map by weight from a stream of their own (a seed's "open" maps are the same as before):
 #   open    the shape above
 #   narrow  a lane "width" wide and "length" long (m). The player starts "start_inset" m from one end and the safe
@@ -161,6 +172,7 @@ const ENEMY_ROUND_SPEED_EVERY := 3
 const ENEMY_SCALE_CAP := 1.5
 # Experience: a kill leaves one XP orb per point of the enemy's difficulty (data/enemies.gd xp_value). Orbs drift
 # toward the player within XP_MAGNET_RADIUS m at XP_MAGNET_SPEED m/s.
+# (the skill tree's xp_range adds metres to the radius).
 const XP_MAGNET_RADIUS := 4.0
 const XP_MAGNET_SPEED := 9.0
 # Weapon attachments (data/attachments.gd) are super rare: this chance per kill.
@@ -207,4 +219,5 @@ const SKILL_STAT_LIMITS := {
 	"hp": [0.0, 300.0], "speed": [-0.3, 0.4], "reload": [-0.5, 1.0], "spread": [0.0, 0.6], "range": [-0.5, 1.0],
 	"damage": [-0.5, 2.0], "dmg_pistol": [-0.5, 2.0], "dmg_scattergun": [-0.5, 2.0], "ammo_save": [0.0, 0.5],
 	"ammo_drop": [0.0, 2.0], "start_ammo": [0.0, 60.0], "extract_speed": [-0.5, 0.5], "loot_reach": [0.0, 2.0],
+	"pellets": [0.0, 2.0], "xp_gain": [0.0, 1.5], "xp_range": [0.0, 8.0],
 }

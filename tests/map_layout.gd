@@ -144,7 +144,10 @@ func _check_walkable(s: int, main) -> void:
 		targets["shelter %d" % i] = main.shelters[i]
 	var homes := {}
 	for e in main.get_children().filter(func(n): return "stats" in n):
-		homes[e.home] = true
+		if e.group_id < Tuning.ENEMY_GROUP_COUNT:  # a garrison's home is its base, which is a solid on purpose
+			homes[e.home] = true
+		else:
+			targets["garrison %d of base %d" % [targets.size(), e.group_id]] = e.position
 	var gi := 0
 	for h in homes:
 		targets["enemy group %d" % gi] = h

@@ -57,6 +57,8 @@ var shots := 0  # shots fired this raid
 var shots_hit := 0  # of those, shots that hurt something
 var depth := 0  # levels descended before this one (0 = fresh from the base)
 var carry := {}  # loot carried down from the last level: it is loot again, at risk
+const EXTRA_PELLET_SPREAD := 0.03  # radians
+
 var drop_mult := 1.0  # scales the ammo drop chance (deeper levels drop more)
 var ammo_spent := 0
 var start_ammo: int = Tuning.STARTING_AMMO  # set by main from the raid difficulty
@@ -254,10 +256,12 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 	var weapon_mul := float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor * float(att.get("damage", 1.0)) * (1.0 + _bonus("dmg_" + weapon_id))
 	var crit := _bonus("crit")
 	var unaware_mul := 1.0 + _bonus("dmg_unaware")
-	for i in int(w["pellets"]):
+	var base_pellets := int(w["pellets"])
+	for i in base_pellets + int(round(_bonus("pellets"))):  # extra bullets from the skill tree
 		var dir := -aim.basis.z
-		if spread > 0.0:
-			dir = (dir + aim.basis.x * randf_range(-spread, spread) + aim.basis.y * randf_range(-spread, spread)).normalized()
+		var cone := spread if i < base_pellets else maxf(spread, EXTRA_PELLET_SPREAD)  # a pistol's extra bullets must not stack on the first
+		if cone > 0.0:
+			dir = (dir + aim.basis.x * randf_range(-cone, cone) + aim.basis.y * randf_range(-cone, cone)).normalized()
 		var query := PhysicsRayQueryParameters3D.create(aim.origin, aim.origin + dir * float(w["max"]))
 		query.exclude = [_player.get_rid()]
 		var hit: Dictionary = space.intersect_ray(query)
@@ -290,8 +294,11 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 				if heal > 0:
 					_player.health = mini(_player.health + heal, _player.max_health)
 				Telemetry.emit("player.kill.enemy", kill_info)
-				_drop_ammo(enemy.global_position, enemy.stats)
-				_on_kill(enemy.global_position, enemy.stats)
+				var at: Vector3 = enemy.global_position
+				if enemy.stats.get("flying", false):
+					at.y = 0.0  # a flyer's loot falls to the ground, where it can be reached
+				_drop_ammo(at, enemy.stats)
+				_on_kill(at, enemy.stats)
 	_wear_attachment(weapon_id)
 	if hits > 0:
 		shots_hit += 1
@@ -359,6 +366,10 @@ func add_xp(amount: int) -> void:
 	while xp >= xp_needed():
 		xp -= xp_needed()
 		picks_pending += 1
+
+# How far from the player an XP orb starts drifting to them: the base radius plus the tree's xp_range.
+func xp_magnet_radius() -> float:
+	return Tuning.XP_MAGNET_RADIUS + _bonus("xp_range")
 
 # The player walked into an XP orb.
 func collect_xp(orb) -> bool:

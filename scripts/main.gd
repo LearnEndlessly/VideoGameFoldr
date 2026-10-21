@@ -168,6 +168,7 @@ func _build_map() -> void:
 			add_child(e)
 	for i in Tuning.SPAWNER_COUNT:
 		_place_spawner(i)
+		_garrison(_spawners.back())
 	_place_shelters()
 	_place_towers()
 	var mix := {}  # this map's own cover mix: each type's weight scaled by a random factor
@@ -678,6 +679,7 @@ func _add_depth_bases() -> void:
 			_place_spawner(_spawners.size())
 			var sp: Node3D = _spawners.back()
 			if extract_zones.all(func(z): return Vector2(z["pos"].x - sp.position.x, z["pos"].z - sp.position.z).length() >= Tuning.EXTRACT_MIN_BASE_DISTANCE):
+				_garrison(sp)
 				break
 			_spawners.pop_back()
 			sp.free()
@@ -741,9 +743,16 @@ func _map_info() -> Dictionary:
 	return {"type": map_type, "w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
 		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
 
-# An enemy base: a small footprint reserved like a group, far from the start. See scripts/spawner.gd.
+# An enemy base: a small footprint reserved like a group, far from the start and (when the map has room)
+# SPAWNER_MIN_SEPARATION m from every other base. See scripts/spawner.gd.
 func _place_spawner(index: int) -> void:
-	var pos: Vector3 = _free_spot(2.0, 2.0, Tuning.SPAWNER_MIN_ORIGIN)
+	var apart: float = Tuning.SPAWNER_NARROW_SEPARATION if map_type == "narrow" else Tuning.SPAWNER_MIN_SEPARATION
+	var pos := _base_spot()
+	for attempt in 30:
+		if _spawners.all(func(o): return Vector2(o.position.x - pos.x, o.position.z - pos.z).length() >= apart):
+			break
+		_taken.pop_back()  # _base_spot reserved this spot; give it back and draw another
+		pos = _base_spot()
 	var sp := Spawner.new()
 	sp.position = pos
 	sp.group_id = Tuning.ENEMY_GROUP_COUNT + index
@@ -752,14 +761,40 @@ func _place_spawner(index: int) -> void:
 	_spawners.append(sp)
 	solids.append(Rect2(Vector2(pos.x - 1.0, pos.z - 1.0), Vector2(2, 2)))
 
+# A spot for a base with the ground around it for its garrison kept clear of cover; a crowded map falls back to the bare
+# 2x2 footprint.
+func _base_spot() -> Vector3:
+	var half := Tuning.SPAWNER_CLUSTER_MAX + 1.0
+	var p = _free_spot(half, half, Tuning.SPAWNER_MIN_ORIGIN, false)
+	return p if p != null else _free_spot(2.0, 2.0, Tuning.SPAWNER_MIN_ORIGIN)
+
+# The base's starting defenders: a cluster standing SPAWNER_CLUSTER_MIN..MAX m around it, in the base's own group so
+# the base counts them toward its cap. Drawn from a stream of its own (the base's seed), never the map's.
+func _garrison(sp: Node3D) -> void:
+	var grng := RandomNumberGenerator.new()
+	grng.seed = sp.rng_seed + 1
+	for i in grng.randi_range(Tuning.SPAWNER_GARRISON_MIN, Tuning.SPAWNER_GARRISON_MAX):
+		var e := Enemy.new()
+		e.stats = Enemies.roll(grng)
+		e.home = sp.position
+		e.group_id = sp.group_id
+		e.patrol_radius = Tuning.SPAWNER_PATROL_RADIUS
+		for attempt in 8:  # not inside a wall or box: take the first of a few draws that is clear
+			var a := grng.randf() * TAU
+			e.position = sp.position + Vector3(cos(a), 0, sin(a)) * grng.randf_range(Tuning.SPAWNER_CLUSTER_MIN, Tuning.SPAWNER_CLUSTER_MAX)
+			if not solids.any(func(r): return r.grow(0.6).has_point(Vector2(e.position.x, e.position.z))):
+				break
+		add_child(e)
+
 # --- map generation -------------------------------------------------------------
 
-# Picks the map's width and depth: a fixed floor area split by a random aspect ratio,
+# Picks the map's width and depth: a floor area that grows with the number of enemy bases, split by a random aspect ratio,
 # so some maps are long and narrow, some wide, some near square.
 func _roll_map_size() -> void:
 	var aspect := exp(rng.randf_range(log(Tuning.MAP_ASPECT_MIN), log(Tuning.MAP_ASPECT_MAX)))
-	var w := clampf(sqrt(Tuning.MAP_AREA * aspect), Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
-	var d := clampf(Tuning.MAP_AREA / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	var area := maxf(Tuning.MAP_AREA, Tuning.MAP_AREA_PER_BASE * (Tuning.SPAWNER_COUNT + mini(depth * Tuning.DEPTH_EXTRA_SPAWNERS, Tuning.DEPTH_MAX_EXTRA_SPAWNERS)))  # more bases, bigger map
+	var w := clampf(sqrt(area * aspect), Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	var d := clampf(area / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
 	half_w = roundf(w) / 2.0
 	half_d = roundf(d) / 2.0
 

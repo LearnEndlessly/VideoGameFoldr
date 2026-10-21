@@ -137,7 +137,8 @@ func _run() -> void:
 	main = await _new_raid(1, true)
 	var groups := {}
 	for c in _enemies(main):
-		groups[c.group_id] = true
+		if c.group_id < Tuning.ENEMY_GROUP_COUNT:  # the bases' garrisons are groups of their own
+			groups[c.group_id] = true
 	_check(groups.size() == Tuning.ENEMY_GROUP_COUNT, "E: %d groups, expected %d" % [groups.size(), Tuning.ENEMY_GROUP_COUNT])
 	await _finish_raid(main)
 

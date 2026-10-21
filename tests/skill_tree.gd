@@ -59,8 +59,8 @@ func _table() -> void:
 		_check(not spots.has(r["pos"]), "%s shares a position" % r["id"])
 		spots[r["pos"]] = true
 		kinds[r["kind"]] = int(kinds.get(r["kind"], 0)) + 1
-	_check(ids.size() == 47, "47 nodes expected, got %d" % ids.size())
-	_check(kinds.get("attribute") == 24 and kinds.get("trunk") == 2 and kinds.get("gateway") == 3 and kinds.get("notable") == 6 and kinds.get("minor") == 12, "kind counts: %s" % [kinds])
+	_check(ids.size() == 51, "51 nodes expected, got %d" % ids.size())
+	_check(kinds.get("attribute") == 24 and kinds.get("trunk") == 2 and kinds.get("gateway") == 3 and kinds.get("notable") == 8 and kinds.get("minor") == 14, "kind counts: %s" % [kinds])
 	for r in SkillNodes.NODES:
 		for l in r["links"]:
 			_check(ids.has(l), "%s links to unknown %s" % [r["id"], l])

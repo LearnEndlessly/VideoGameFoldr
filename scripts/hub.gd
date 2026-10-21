@@ -22,6 +22,8 @@ const Sfx = preload("res://scripts/sfx.gd")
 const UIKit = preload("res://scripts/ui_kit.gd")
 const Attachments = preload("res://data/attachments.gd")
 const Model = preload("res://scripts/model.gd")
+const SkillTreeView = preload("res://scripts/skill_tree_view.gd")
+const SkillTree = preload("res://scripts/skill_tree.gd")
 
 const HALF_W := 9.0
 const HALF_D := 7.0
@@ -71,6 +73,7 @@ var _head: VBoxContainer  # the open panel's header
 var _content: VBoxContainer
 var _status: Label
 var _column: VBoxContainer  # the open panel's column; wider for the character screen
+var _tree_cam := {"center": Vector2(0, -4), "scale": 34.0}  # the skill tree view's pan and zoom, kept across redraws
 var _scroll: ScrollContainer  # the character screen's list: kept where it was when a point is spent
 
 func _ready() -> void:
@@ -475,7 +478,7 @@ func _open_panel(id: String) -> void:
 	open_station = id
 	_status.text = ""
 	_scroll = null
-	_column.custom_minimum_size.x = 940.0 if id == "character" else 760.0
+	_column.custom_minimum_size.x = 1120.0 if id == "character" else 760.0
 	var accent: Color = STATIONS[open_station]["color"]
 	accent.a = 1.0
 	_panel.theme = UIKit.theme(accent)
@@ -699,18 +702,43 @@ func _repair(att: String) -> void:
 func _fill_character() -> void:
 	var a := _accent()
 	var top := _row(null, 14)
-	top.add_child(UIKit.label(str(profile.unspent_points), 56, UIKit.AMBER, true))
+	top.add_child(UIKit.label(str(profile.unspent_points), 44, UIKit.AMBER, true))
 	var cap := VBoxContainer.new()
 	cap.alignment = BoxContainer.ALIGNMENT_CENTER
 	cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(cap)
-	cap.add_child(UIKit.label("SKILL POINTS", 18, UIKit.TEXT, true))
-	var how := UIKit.label("A point for every round cleared (kill every enemy, destroy every enemy base). The skill tree screen is the next step; until it is built the points wait here.", 12, UIKit.DIM)
+	cap.add_child(UIKit.label("SKILL POINTS", 16, UIKit.TEXT, true))
+	var how := UIKit.label("One point per cleared round (kill every enemy, destroy every base). Click a glowing node to take it, right-click a taken one to give it back (%d ammo from the stash). Drag to pan, wheel to zoom." % Tuning.SKILL_REFUND_AMMO, 12, UIKit.DIM)
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	how.custom_minimum_size = Vector2(430, 0)
+	how.custom_minimum_size = Vector2(560, 0)
 	cap.add_child(how)
-	top.add_child(UIKit.tile("allocated", "%d / %d" % [profile.allocated_nodes.size(), Tuning.SKILL_POINT_CAP], a, UIKit.TEXT, 100))
-	top.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a, UIKit.TEXT, 90))
+	var totals := SkillTree.totals_of(profile.allocated_nodes)
+	for attr in SkillTreeView.ATTR_COLORS:
+		top.add_child(UIKit.tile(attr, str(totals[attr]), SkillTreeView.ATTR_COLORS[attr], UIKit.TEXT, 64))
+	top.add_child(UIKit.tile("taken", "%d / %d" % [profile.allocated_nodes.size(), Tuning.SKILL_POINT_CAP], a, UIKit.TEXT, 90))
+	top.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a, UIKit.TEXT, 80))
+	var view := SkillTreeView.new()
+	view.profile = profile
+	view.cam = _tree_cam
+	view.custom_minimum_size = Vector2(0, 400)
+	view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	view.allocate_requested.connect(_allocate_node)
+	view.refund_requested.connect(_refund_node)
+	_content.add_child(view)
+
+func _allocate_node(id: String) -> void:
+	if profile.allocate_node(id):
+		Sfx.play("pickup")
+		_commit()
+	else:
+		_status.text = "Can't take that: " + SkillTree.new(profile.allocated_nodes, profile.unspent_points).can_allocate(id)["reason"]
+
+func _refund_node(id: String) -> void:
+	var why: Dictionary = profile.can_refund_node(id)
+	if why["ok"] and profile.refund_node(id):
+		_commit()
+	else:
+		_status.text = "Can't give that back: " + why["reason"]
 
 func _fill_map() -> void:
 	_row().add_child(UIKit.label("MAP %d" % selected_seed, 44, UIKit.AMBER, true))
