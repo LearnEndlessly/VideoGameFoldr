@@ -191,3 +191,20 @@ const ENEMY_STEP_HEAR_DISTANCE := 40.0
 const SOUND_UNIT_SIZE := 3.0
 # Where the persisted loot totals are saved.
 const PROFILE_PATH := "user://profile.json"
+
+# Skill tree (data/skill_nodes.gd, scripts/skill_tree.gd, scripts/skill_stats.gd).
+# A gateway needs this many allocated attribute nodes of its attribute, a notable needs the second number.
+const SKILL_GATEWAY_REQ := 4
+const SKILL_NOTABLE_REQ := 6
+# Points one node costs, and the stash ammo a refund costs (a placeholder sink).
+const SKILL_NODE_COST := 1
+const SKILL_REFUND_AMMO := 10
+# Most points that can ever be held, unspent plus allocated (it was 15 for the old attributes). Round clears grant them.
+const SKILL_POINT_CAP := 24
+# Floor and cap of what the tree adds to each stat, in the unit of the stat itself (a fraction for a percentage, metres or
+# rounds or health for the flat ones). extract_speed 0.5 means the hold never drops under 50% of its base.
+const SKILL_STAT_LIMITS := {
+	"hp": [0.0, 300.0], "speed": [-0.3, 0.4], "reload": [-0.5, 1.0], "spread": [0.0, 0.6], "range": [-0.5, 1.0],
+	"damage": [-0.5, 2.0], "dmg_pistol": [-0.5, 2.0], "dmg_scattergun": [-0.5, 2.0], "ammo_save": [0.0, 0.5],
+	"ammo_drop": [0.0, 2.0], "start_ammo": [0.0, 60.0], "extract_speed": [-0.5, 0.5], "loot_reach": [0.0, 2.0],
+}

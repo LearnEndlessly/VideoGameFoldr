@@ -8,6 +8,8 @@ const Upgrades = preload("res://data/upgrades.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Difficulty = preload("res://data/difficulty.gd")
 const Attachments = preload("res://data/attachments.gd")
+const SkillTree = preload("res://scripts/skill_tree.gd")
+const SkillStats = preload("res://scripts/skill_stats.gd")
 
 var path: String
 var totals := {}  # item id -> quantity in the stash
@@ -15,7 +17,10 @@ var attached := {}  # weapon id -> attachment id fitted to it (one per weapon); 
 var wear := {}  # attachment id -> shots left (missing = full)
 var equipped := "pistol"  # the weapon held at the start of a raid
 var attrs := {}  # attribute id -> level (missing = 0)
-var points := 0  # unspent attribute points
+var points := 0  # old attribute points; the skill tree uses unspent_points (removed in the wiring step)
+var allocated_nodes: Array = []  # skill tree node ids taken (data/skill_nodes.gd), in the order they were taken
+var unspent_points := 0  # points to spend in the skill tree
+const SAVE_VERSION := 3
 var difficulty := {}  # raid difficulty option id -> level index (missing = Normal); see data/difficulty.gd
 # Lifetime scoreboard numbers. "runs" counts runs (a descent is part of the run it came from), "deepest" is the deepest level reached
 # (1 = the first), "hits" counts shots that hurt something, so hits / shots is the accuracy.
@@ -32,6 +37,8 @@ func load_from_disk() -> void:
 	wear = {}
 	attrs = {}
 	points = 0
+	allocated_nodes = []
+	unspent_points = 0
 	difficulty = {}
 	stats = STAT_DEFAULTS.duplicate()
 	if not FileAccess.file_exists(path):
@@ -60,18 +67,17 @@ func load_from_disk() -> void:
 			if Attachments.DATA.has(str(id)):
 				wear[str(id)] = clampi(int(wr[id]), 0, int(Attachments.DATA[str(id)]["durability"]))
 	_prune_attached()
-	var a = data.get("attrs")
-	if typeof(a) == TYPE_DICTIONARY:
-		for id in a:
-			if Upgrades.ATTRS.has(str(id)):
-				attrs[str(id)] = clampi(int(a[id]), 0, Upgrades.ATTR_LEVEL_MAX)
-		var over := attr_total() - Upgrades.ATTR_TOTAL_MAX  # a hand-edited save cannot beat the cap
-		for id in attrs.keys():
-			var cut := mini(over, int(attrs[id]))
-			if cut > 0:
-				attrs[id] = int(attrs[id]) - cut
-				over -= cut
-	points = maxi(int(data.get("points", 0)), 0)
+	if int(data.get("version", 1)) < SAVE_VERSION:
+		_migrate_old_attributes(data)
+	else:
+		var t := SkillTree.new([], 1 << 30)  # replay the saved order; a hand-edited illegal node is dropped
+		var saved = data.get("allocated_nodes")
+		if typeof(saved) == TYPE_ARRAY:
+			for id in saved:
+				if SkillTree.has_node(str(id)):
+					t.allocate(str(id))
+		allocated_nodes = t.allocated
+		unspent_points = clampi(int(data.get("unspent_points", 0)), 0, maxi(Tuning.SKILL_POINT_CAP - allocated_nodes.size(), 0))
 	var dd = data.get("difficulty")
 	if typeof(dd) == TYPE_DICTIONARY:
 		for id in dd:
@@ -81,6 +87,19 @@ func load_from_disk() -> void:
 	if typeof(s) == TYPE_DICTIONARY:
 		for k in STAT_DEFAULTS:
 			stats[k] = maxi(int(s.get(k, STAT_DEFAULTS[k])), 0)
+
+# Save versions before 3 held attribute levels and unspent points. Keep a copy of the file (once), refund every purchase as
+# an unspent skill point (held to the point cap) and start with an empty tree. The old fields are not carried forward.
+func _migrate_old_attributes(data: Dictionary) -> void:
+	if not FileAccess.file_exists(path + ".v2.bak"):
+		DirAccess.copy_absolute(path, path + ".v2.bak")
+	var refunded := maxi(int(data.get("points", 0)), 0)
+	var a = data.get("attrs")
+	if typeof(a) == TYPE_DICTIONARY:
+		for id in a:
+			if Upgrades.ATTRS.has(str(id)):
+				refunded += clampi(int(a[id]), 0, Upgrades.ATTR_LEVEL_MAX)
+	unspent_points = mini(refunded, Tuning.SKILL_POINT_CAP)
 
 func add_items(items: Dictionary) -> void:
 	for id in items:
@@ -204,12 +223,44 @@ func attr_total() -> int:
 		t += int(attrs[id])
 	return t
 
-# A cleared round earns a point, unless the points held and spent already reach Upgrades.ATTR_TOTAL_MAX. True if one was added.
+# A cleared round earns a skill point, unless the points held and allocated already reach Tuning.SKILL_POINT_CAP. True if one was added.
 func grant_point() -> bool:
-	if points + attr_total() >= Upgrades.ATTR_TOTAL_MAX:
+	if unspent_points + allocated_nodes.size() >= Tuning.SKILL_POINT_CAP:
 		return false
-	points += 1
+	unspent_points += 1
 	return true
+
+# --- skill tree (scripts/skill_tree.gd holds the rules; these keep the profile's two fields in step) ---
+
+func _tree() -> SkillTree:
+	return SkillTree.new(allocated_nodes, unspent_points)
+
+func allocate_node(id: String) -> bool:
+	var t := _tree()
+	if not t.allocate(id):
+		return false
+	unspent_points = t.points
+	return true
+
+# {ok, reason} for giving a node back: the tree must stay legal and the stash must hold Tuning.SKILL_REFUND_AMMO ammo.
+func can_refund_node(id: String) -> Dictionary:
+	var r := _tree().can_refund(id)
+	if r["ok"] and owned("ammo") < Tuning.SKILL_REFUND_AMMO:
+		return {"ok": false, "reason": "needs %d ammo in the stash" % Tuning.SKILL_REFUND_AMMO}
+	return r
+
+func refund_node(id: String) -> bool:
+	if not can_refund_node(id)["ok"]:
+		return false
+	var t := _tree()
+	t.refund(id)
+	unspent_points = t.points
+	take_items({"ammo": Tuning.SKILL_REFUND_AMMO})
+	return true
+
+# What the tree adds to a stat (scripts/skill_stats.gd), floors and caps applied.
+func node_bonus(stat: String) -> float:
+	return SkillStats.bonus(stat, allocated_nodes)
 
 # Spends one point on an attribute. False if there is no point to spend, the attribute is at ATTR_LEVEL_MAX or the
 # total spent is at ATTR_TOTAL_MAX.
@@ -246,7 +297,7 @@ func save() -> bool:
 	if f == null:
 		push_error("Cannot write profile to %s" % tmp)
 		return false
-	f.store_string(JSON.stringify({"version": 2, "totals": totals, "attached": attached, "wear": wear, "equipped": equipped,
-		"attrs": attrs, "points": points, "difficulty": difficulty, "stats": stats}, "\t"))
+	f.store_string(JSON.stringify({"version": SAVE_VERSION, "totals": totals, "attached": attached, "wear": wear, "equipped": equipped,
+		"allocated_nodes": allocated_nodes, "unspent_points": unspent_points, "difficulty": difficulty, "stats": stats}, "\t"))
 	f.close()
 	return DirAccess.rename_absolute(tmp, path) == OK
