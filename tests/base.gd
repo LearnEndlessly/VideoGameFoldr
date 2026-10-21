@@ -4,6 +4,8 @@
 # save without those fields), the upgrades taking effect in a raid, and the base room itself.
 extends SceneTree
 
+const ZoneData = preload("res://data/enemies.gd")
+
 const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const Upgrades = preload("res://data/upgrades.gd")
@@ -19,6 +21,7 @@ func _check(ok: bool, message: String) -> void:
 		failures.append(message)
 
 func _init() -> void:
+	ZoneData.zones_enabled = false  # these tests count exact damage; tests/enemy_overhaul.gd covers the zones
 	await _run()
 	for f in failures:
 		printerr(f)
@@ -42,10 +45,10 @@ func _run() -> void:
 	p.add_items({"ammo": 70, "medkit": 6})
 	_check(p.equip("scattergun") and p.equipped == "scattergun" and not p.equip("not_a_weapon"), "equip should accept real weapons only")
 
-	# Attribute points: earned on extract (1 + 1 per 5 kills), spent one level at a time.
+	# Attribute points: an extract earns none (clearing rounds does, see tests/attributes.gd), they are spent one level at a time.
 	_check(not p.spend_point("speed"), "no points, no level")
-	_check(p.record_extract(12) == 3 and p.points == 3 and p.stats["extracts"] == 1, "12 kills should earn 1 + 2 points, got %d" % p.points)
-	_check(p.record_extract(100) == Upgrades.POINTS_PER_RAID_MAX and p.points == 3 + Upgrades.POINTS_PER_RAID_MAX, "a huge raid is capped at %d points, got %d" % [Upgrades.POINTS_PER_RAID_MAX, p.points])
+	p.record_extract()
+	_check(p.points == 0 and p.stats["extracts"] == 1, "an extract alone earns no attribute point, got %d" % p.points)
 	p.points = 3
 	_check(p.spend_point("speed") and p.spend_point("constitution") and p.spend_point("constitution") and p.points == 0, "three points, three levels")
 	_check(not p.spend_point("handling"), "spending needs a point")
@@ -53,7 +56,7 @@ func _run() -> void:
 	p.points = 10
 	for i in 10:
 		p.spend_point("handling")
-	_check(p.attr_level("handling") == 5 and p.points == 5, "an attribute stops at its max level")
+	_check(p.attr_level("handling") == Upgrades.ATTR_LEVEL_MAX and p.points == 5, "an attribute stops at its max level")
 	_check(is_equal_approx(p.reload_mult(), 0.5), "5 levels of handling should halve reload time")
 	_check(not p.spend_point("not_an_attribute"), "unknown attribute must be refused")
 
@@ -91,7 +94,7 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 
-	# Extracting banks points and saves them; the results carry the points earned.
+	# Extracting saves the run on the scoreboard; the results carry the points earned (none: they come from cleared rounds).
 	_clean()
 	main = await _new_raid(2)
 	var results: Array = []
@@ -103,10 +106,10 @@ func _run() -> void:
 		if not results.is_empty():
 			break
 		await physics_frame
-	_check(results.size() == 1 and results[0]["points"] == Upgrades.POINTS_PER_EXTRACT + 1, "5 frags and an extract should earn 2 points, results %s" % [results])
+	_check(results.size() == 1 and results[0]["points"] == 0, "an extract alone should earn no attribute points, results %s" % [results])
 	var after := Profile.new(PATH)
 	after.load_from_disk()
-	_check(after.points == 2 and after.stats["extracts"] == 1, "the points should be saved, got %d" % after.points)
+	_check(after.points == 0 and after.stats["extracts"] == 1, "the extract should be saved, got %d points" % after.points)
 	main.queue_free()
 	await process_frame
 
@@ -123,7 +126,7 @@ func _run() -> void:
 	await process_frame
 	var hub = main.get_children().filter(func(c): return "open_station" in c)[0]
 	_check(main.get_children().filter(func(c): return "stats" in c or "group_id" in c).is_empty(), "the base must have no enemies or enemy bases")
-	_check(get_nodes_in_group("station").size() == 4, "the base should have 3 wall stations and the map device")
+	_check(get_nodes_in_group("station").size() == 5, "the base should have 4 wall stations (stash, ammo depot, gunsmith, character) and the map device")
 	_check(not main.get_children().any(func(c): return "raid_id" in c) and main.raid == null, "the base is not a raid")
 	var armory = get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "armory")[0]
 	hub._on_station_used(armory)

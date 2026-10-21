@@ -41,7 +41,7 @@ func _init() -> void:
 	hub.player._head.rotation.x = -0.5
 	hub.set_seed(5)
 	await _shot("b1_base")
-	for id in ["map", "stash", "armory", "character", "raid"]:
+	for id in ["map", "stash", "armory", "gunsmith", "character", "raid"]:
 		if id == "raid":
 			hub._map_button("play")
 		else:

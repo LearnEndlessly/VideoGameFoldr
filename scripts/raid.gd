@@ -26,6 +26,10 @@ signal reload_done(weapon_id: String)
 signal threat_started
 signal bullet_traced(weapon_id: String, end: Vector3, normal: Vector3, kind: String)  # one per pellet, for the bullet visuals
 signal attachment_broke(attachment_name: String)
+signal combo_kill(count: int)  # a kill joined the combo
+signal combo_ended(count: int, bonus: int)  # the combo ran out: `bonus` score was paid
+signal zone_hit(zone: String)  # a shot landed on an enemy: "head", "back", "side" or "front"
+signal point_earned  # the round was cleared: one attribute point, spendable at the base
 signal threat_ended  # wave mode only
 signal ended(result: Dictionary)  # {"outcome": "extracted"|"dead", "items": {id: qty}, "saved": bool}
 
@@ -67,6 +71,14 @@ var picks_pending := 0  # level-ups earned and not yet taken
 var powerups := {}  # active powerup id -> seconds left
 var att_left := {}  # attachment id -> shots left, from the profile; written back when the raid ends
 var cooldown_mult := 1.0  # the Rapid fire upgrade shortens the wait between shots
+var combo := 0  # kills in the running combo (0 = none)
+var combo_left := 0.0  # seconds until it runs out; every kill refills it, to less each time
+var combo_total := 0.0  # the window the last kill started, for the meter
+var combo_points := 0  # score banked in the running combo, paid (times the multiplier) when it ends
+var best_combo := 0
+var score := 0
+var points_earned := 0  # attribute points earned this raid by clearing a round
+var round_cleared := false
 
 var _threat_reached := false
 var _drop_rng := RandomNumberGenerator.new()  # enemy drops; seeded per raid so a test can replay them
@@ -77,6 +89,11 @@ var xp := 0  # experience toward the next level-up
 var _power_rng := RandomNumberGenerator.new()
 var _loot_rng := RandomNumberGenerator.new()  # scrap and attachment drops
 var _fire_cooldown := 0.0
+var _cooldown_total := 0.0  # the wait the last shot started, for the ready indicator
+var _luck := RandomNumberGenerator.new()  # attribute chances (crit, free shots, wear); drawn only when the attribute is held
+var _regen_acc := 0.0
+var _xp_extra := 0.0
+var _clear_clock := 0.0
 var _sample_clock := Telemetry.SAMPLE_SECONDS  # starts full so the first sample is logged at once
 var _threat_done := false  # a wave has run; it does not start again
 var _wave_left := 0.0
@@ -86,6 +103,7 @@ func setup(player) -> void:
 	_drop_rng.seed = seed_value
 	_power_rng.seed = seed_value + 3
 	_loot_rng.seed = seed_value + 5
+	_luck.seed = seed_value + 7
 	if profile != null:
 		for w in profile.attached:
 			att_left[profile.attached[w]] = profile.shots_left(profile.attached[w])
@@ -96,7 +114,7 @@ func setup(player) -> void:
 	if start_ammo > 0:
 		brought["ammo"] = start_ammo - player.inventory.add("ammo", start_ammo)
 	for id in WeaponData.DATA:
-		loaded[id] = mini(WeaponData.DATA[id]["clip"], player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
+		loaded[id] = mini(clip_size(id), player.inventory.count(WeaponData.DATA[id]["ammo_item"]))
 	Telemetry.start({"seed": seed_value, "start_ammo": start_ammo, "reward_mult": reward_mult, "threat_delay": threat_delay, "depth": depth, "map": map_info})
 	_apply_upgrades()
 
@@ -132,7 +150,7 @@ func shown_rounds(weapon_id: String) -> int:
 
 func _reload_target(weapon_id: String) -> int:
 	var w: Dictionary = WeaponData.DATA[weapon_id]
-	return mini(w["clip"], _player.inventory.count(w["ammo_item"]))
+	return mini(clip_size(weapon_id), _player.inventory.count(w["ammo_item"]))
 
 # Start reloading the current weapon from the backpack. False if the magazine is full or
 # the backpack has nothing more to put in it.
@@ -147,6 +165,14 @@ func request_reload() -> bool:
 
 func cancel_reload() -> void:
 	reload_weapon = ""
+
+# What the character's attributes add to `stat` (data/upgrades.gd), 0 with no profile.
+func _bonus(stat: String) -> float:
+	return profile.bonus(stat) if profile != null else 0.0
+
+# Rounds a magazine of `weapon_id` holds: its clip, plus the Extended mags attribute.
+func clip_size(weapon_id: String) -> int:
+	return maxi(int(round(float(WeaponData.DATA[weapon_id]["clip"]) * (1.0 + _bonus("clip")))), 1)
 
 # The attachment fitted to a weapon that still works (not broken): its id, or "".
 func _attachment_id(weapon_id: String) -> String:
@@ -163,6 +189,10 @@ func _att(weapon_id: String) -> Dictionary:
 func zoom_mult(weapon_id: String) -> float:
 	return float(_att(weapon_id).get("zoom", 1.0))
 
+# The field of view multiplier while zoomed: the attachment's, and the Eagle eye attribute's (never past 0.4).
+func fov_mult(weapon_id: String) -> float:
+	return zoom_mult(weapon_id) * clampf(1.0 - _bonus("zoom"), 0.4, 1.0)
+
 # The player changed weapon: its attachment changes the reload time.
 func weapon_changed() -> void:
 	if _player != null:
@@ -171,7 +201,7 @@ func weapon_changed() -> void:
 # One shot of wear for the attachment on `weapon_id`; at 0 it breaks and stops helping.
 func _wear_attachment(weapon_id: String) -> void:
 	var id := _attachment_id(weapon_id)
-	if id == "":
+	if id == "" or (_bonus("att_wear") > 0.0 and _luck.randf() < _bonus("att_wear")):
 		return
 	att_left[id] = int(att_left[id]) - 1
 	if att_left[id] <= 0:
@@ -196,23 +226,34 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		return false
 	var w: Dictionary = WeaponData.DATA[weapon_id]
 	var att := _att(weapon_id)
-	_fire_cooldown = w["cooldown"] * cooldown_mult * float(att.get("cooldown", 1.0))  # also paces the dry-fire click
+	var range_mult := 1.0 + _bonus("range")  # Long shot
+	if range_mult != 1.0:
+		w = w.duplicate()
+		w["effective"] = float(w["effective"]) * range_mult
+		w["max"] = float(w["max"]) * range_mult
+	_cooldown_total = w["cooldown"] * cooldown_mult * float(att.get("cooldown", 1.0))
+	_fire_cooldown = _cooldown_total  # also paces the dry-fire click
 	var item: String = w["ammo_item"]
 	var cost: int = w["ammo_per_shot"]
-	if loaded_rounds(weapon_id) < cost or not _player.inventory.remove(item, cost):
+	var free := _bonus("ammo_save") > 0.0 and _luck.randf() < _bonus("ammo_save")  # Thrifty: this shot costs nothing
+	if loaded_rounds(weapon_id) < cost or (not free and not _player.inventory.remove(item, cost)):
 		dry_fire.emit()
 		Telemetry.emit("player.fire.weapon", {"id": weapon_id, "outcome": "dry", "hits": 0, "dmg": 0, "ammo_left": _player.inventory.count(item)})
 		return false
+	var spent := 0 if free else cost
 	if brought.has(item):
-		brought[item] = maxi(int(brought[item]) - cost, 0)  # the kit is spent first
-	loaded[weapon_id] = int(loaded[weapon_id]) - cost
+		brought[item] = maxi(int(brought[item]) - spent, 0)  # the kit is spent first
+	loaded[weapon_id] = int(loaded[weapon_id]) - spent
 	shots += 1
-	ammo_spent += cost
+	ammo_spent += spent
 	shot_fired.emit(weapon_id)
 	var hits := 0
 	var total_dmg := 0
 	var space: PhysicsDirectSpaceState3D = _player.get_world_3d().direct_space_state
-	var spread: float = float(w["spread"]) * float(att.get("spread", 1.0))
+	var spread: float = float(w["spread"]) * float(att.get("spread", 1.0)) * maxf(1.0 - _bonus("spread"), 0.0)
+	var weapon_mul := float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor * float(att.get("damage", 1.0)) * (1.0 + _bonus("dmg_" + weapon_id))
+	var crit := _bonus("crit")
+	var unaware_mul := 1.0 + _bonus("dmg_unaware")
 	for i in int(w["pellets"]):
 		var dir := -aim.basis.z
 		if spread > 0.0:
@@ -223,16 +264,31 @@ func request_fire(weapon_id: String, aim: Transform3D) -> bool:
 		var end: Vector3 = hit["position"] if hit else aim.origin + dir * minf(float(w["max"]), 90.0)
 		bullet_traced.emit(weapon_id, end, hit.get("normal", Vector3.ZERO), "enemy" if hit and hit["collider"].has_method("take_damage") else ("wall" if hit else "none"))
 		if hit and hit["collider"].has_method("take_damage"):
-			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * float(damage_mult.get(weapon_id, 1.0)) * _dmg_factor * float(att.get("damage", 1.0))))
+			var dmg_f := weapon_mul
+			if "alert" in hit["collider"] and not hit["collider"].alert:
+				dmg_f *= unaware_mul  # Ambusher
+			if crit > 0.0 and _luck.randf() < crit:
+				dmg_f *= 2.0  # Lethal
+			var zone := ""
+			if hit["collider"].has_method("zone_at"):  # armor in front, weak points on the head and back
+				zone = hit["collider"].zone_at(hit["position"], aim.origin)
+				dmg_f *= hit["collider"].zone_mult(zone)
+				if zone != "":
+					zone_hit.emit(zone)
+			var dmg := int(round(WeaponData.damage_at(w, aim.origin.distance_to(hit["position"])) * dmg_f))
 			hits += 1
 			total_dmg += dmg
 			var enemy = hit["collider"]
 			var kill_info := {}
 			if "stats" in enemy:  # only enemies carry type/modifier
 				kill_info = {"id": enemy.stats["type"], "mod": enemy.stats["modifier"], "group": enemy.group_id,
-					"weapon": weapon_id, "range": aim.origin.distance_to(hit["position"]), "pos": enemy.global_position}
+					"weapon": weapon_id, "zone": zone, "range": aim.origin.distance_to(hit["position"]), "pos": enemy.global_position}
 			if enemy.take_damage(dmg) and "stats" in enemy:  # the enemy base dying is not a kill
 				_player.kills += 1
+				_combo_add(enemy.stats)
+				var heal := int(round(_bonus("kill_heal")))  # Bloodlust
+				if heal > 0:
+					_player.health = mini(_player.health + heal, _player.max_health)
 				Telemetry.emit("player.kill.enemy", kill_info)
 				_drop_ammo(enemy.global_position, enemy.stats)
 				_on_kill(enemy.global_position, enemy.stats)
@@ -253,8 +309,8 @@ func _apply_upgrades() -> void:
 	var t := {}  # each upgrade's levels counted in full levels (every 3 levels the next ones add less)
 	for id in up:
 		t[id] = Upgrades.total(_lvl(id))
-	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * t["damage"]) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
-	cooldown_mult = maxf(1.0 - float(up["firerate"]["per_level"]) * t["firerate"], 0.25)
+	_dmg_factor = (1.0 + float(up["damage"]["per_level"]) * t["damage"] + _bonus("damage")) * (float(Powerups.DATA["damage"]["mult"]) if powerups.has("damage") else 1.0)
+	cooldown_mult = maxf(1.0 - float(up["firerate"]["per_level"]) * t["firerate"] - _bonus("firerate"), 0.25)
 	reload_seconds = float(_base["reload"]) * maxf(1.0 - float(up["hands"]["per_level"]) * t["hands"], 0.25) * float(_att(_player.weapon_id).get("reload", 1.0))
 	_player.max_health = int(_base["hp"]) + int(round(float(up["vitality"]["hp"]) * t["vitality"]))
 	_player.health = mini(_player.health, _player.max_health)
@@ -272,12 +328,12 @@ func _on_kill(pos: Vector3, stats := {}) -> void:
 			var orb := XpOrb.new()
 			orb.position = pos + Vector3(_loot_rng.randf_range(-1.2, 1.2), 0, _loot_rng.randf_range(-1.2, 1.2))
 			get_parent().add_child.call_deferred(orb)
-	if not stats.is_empty() and _loot_rng.randf() < float(stats.get("scrap_chance", 0.0)):  # scrap repairs attachments
+	if not stats.is_empty() and _loot_rng.randf() < float(stats.get("scrap_chance", 0.0)) * (1.0 + _bonus("scrap_find")):  # scrap repairs attachments
 		var amount: Array = stats["scrap"]
 		_spawn_pickup("scrap", _loot_rng.randi_range(amount[0], amount[1]), pos + Vector3(0.7, 0, 0))
-	if _loot_rng.randf() < Tuning.ATTACHMENT_DROP_CHANCE:  # super rare
+	if _loot_rng.randf() < Tuning.ATTACHMENT_DROP_CHANCE * (1.0 + _bonus("att_find")):  # super rare
 		_spawn_pickup(Attachments.DATA.keys()[_loot_rng.randi_range(0, Attachments.DATA.size() - 1)], 1, pos + Vector3(-0.7, 0, 0))
-	if _power_rng.randf() < Tuning.POWERUP_DROP_CHANCE:
+	if _power_rng.randf() < Tuning.POWERUP_DROP_CHANCE * (1.0 + _bonus("powerup_find")):
 		var p := Powerup.new()
 		p.id = Powerups.DATA.keys()[_power_rng.randi_range(0, Powerups.DATA.size() - 1)]
 		p.position = pos
@@ -296,7 +352,10 @@ func xp_needed() -> int:
 
 # Adds experience; each full level earns a pick.
 func add_xp(amount: int) -> void:
-	xp += amount
+	_xp_extra += amount * _bonus("xp_gain")  # Quick study: the fractions add up to whole points
+	var extra := int(_xp_extra)
+	_xp_extra -= extra
+	xp += amount + extra
 	while xp >= xp_needed():
 		xp -= xp_needed()
 		picks_pending += 1
@@ -331,7 +390,7 @@ func choose_upgrade(id: String) -> bool:
 func collect_powerup(p) -> bool:
 	if state != State.ACTIVE or not is_instance_valid(p) or p.is_queued_for_deletion():
 		return false
-	powerups[p.id] = float(Powerups.DATA[p.id]["seconds"])
+	powerups[p.id] = float(Powerups.DATA[p.id]["seconds"]) * (1.0 + _bonus("powerup_time"))
 	p.queue_free()
 	_apply_upgrades()
 	return true
@@ -355,7 +414,7 @@ func powerup_text() -> String:
 
 # Rolls an enemy's ammo drop (data/enemies.gd) and, on success, leaves a pickup where it died.
 func _drop_ammo(pos: Vector3, stats: Dictionary) -> bool:
-	if _drop_rng.randf() >= float(stats.get("drop_chance", 0.0)) * drop_mult:
+	if _drop_rng.randf() >= float(stats.get("drop_chance", 0.0)) * drop_mult * (1.0 + _bonus("ammo_drop")):
 		return false
 	var amount: Array = stats["drop"]
 	var pickup := Pickup.new()
@@ -383,9 +442,10 @@ func request_pickup(pickup) -> bool:
 # Seconds the hold in a zone takes. hold_seconds is zone A's; B takes b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS
 # times as long, so a test that shortens hold_seconds shortens both.
 func hold_seconds_for(zone_id: String) -> float:
+	var quick := maxf(1.0 - _bonus("extract_speed"), 0.3)  # Quick exit
 	if zone_id == "B":
-		return hold_seconds * b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS
-	return hold_seconds
+		return hold_seconds * b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS * quick
+	return hold_seconds * quick
 
 # The player is standing in extract zone `zone_id`. Starts (or continues) the hold timer. Starting a hold in
 # zone B is loud: every enemy group with a member within b_noise_radius of the zone is alerted.
@@ -447,6 +507,12 @@ func _physics_process(delta: float) -> void:
 			reload_weapon = ""
 			reload_done.emit(id)
 	elapsed += delta
+	_regen(delta)
+	_tick_combo(delta)
+	_clear_clock += delta
+	if _clear_clock >= 0.5:
+		_clear_clock = 0.0
+		check_round_clear()
 	for id in powerups.keys():
 		powerups[id] -= delta
 		if powerups[id] <= 0.0:
@@ -470,6 +536,89 @@ func _physics_process(delta: float) -> void:
 		extract_elapsed += delta
 		if extract_elapsed >= hold_seconds_for(extract_zone):
 			_finish("extracted")
+
+# Regeneration: the fractions of a point add up to whole health.
+func _regen(delta: float) -> void:
+	var rate := _bonus("regen")
+	if rate <= 0.0 or _player.health >= _player.max_health:
+		return
+	_regen_acc += rate * delta
+	var whole := int(_regen_acc)
+	_regen_acc -= whole
+	_player.health = mini(_player.health + whole, _player.max_health)
+
+# --- kill combo ---
+
+# Seconds a combo of `count` kills lasts after its last kill: COMBO_WINDOW, less COMBO_WINDOW_SHRINK for every
+# kill after the first (never under COMBO_WINDOW_MIN), then Adrenaline.
+func combo_window(count: int) -> float:
+	return maxf(Tuning.COMBO_WINDOW - Tuning.COMBO_WINDOW_SHRINK * (count - 1), Tuning.COMBO_WINDOW_MIN) * (1.0 + _bonus("combo_time"))
+
+# The score multiplier a combo of `count` kills pays: 1 for the first, COMBO_MULT_STEP more for every kill after.
+func combo_mult(count: int) -> float:
+	return 1.0 + Tuning.COMBO_MULT_STEP * (count - 1)
+
+# What the running combo pays if it ended now.
+func combo_payout() -> int:
+	return int(round(combo_points * combo_mult(combo) * (1.0 + _bonus("combo_score"))))
+
+func _combo_add(stats: Dictionary) -> void:
+	combo += 1
+	best_combo = maxi(best_combo, combo)
+	combo_points += Enemies.xp_value(stats) * Tuning.COMBO_KILL_SCORE  # a tougher enemy is worth more
+	combo_total = combo_window(combo)
+	combo_left = combo_total
+	combo_kill.emit(combo)
+
+func _tick_combo(delta: float) -> void:
+	if combo > 0:
+		combo_left -= delta
+		if combo_left <= 0.0:
+			end_combo()
+
+# The combo runs out (or the raid ends): the multiplied score is paid and the counter starts over.
+func end_combo() -> void:
+	if combo <= 0:
+		return
+	var bonus := combo_payout()
+	score += bonus
+	var count := combo
+	combo = 0
+	combo_points = 0
+	combo_left = 0.0
+	combo_ended.emit(count, bonus)
+
+# --- rounds ---
+
+# Round number of this level: 1 at the base's first raid, then one more for every descent.
+func round_number() -> int:
+	return depth + 1
+
+# Every ATTR_ROUNDS_PER_POINT rounds, once no enemy and no enemy base is left alive the round is cleared and the
+# player earns an attribute point (saved at once, so dying afterwards keeps it). True the moment that happens.
+func check_round_clear() -> bool:
+	if state != State.ACTIVE or round_cleared or round_number() % Upgrades.ATTR_ROUNDS_PER_POINT != 0:
+		return false
+	for group in ["enemy", "spawner"]:
+		for n in get_tree().get_nodes_in_group(group):
+			if not n.is_queued_for_deletion():
+				return false
+	round_cleared = true
+	if profile != null and profile.grant_point():
+		points_earned += 1
+		profile.save()
+		point_earned.emit()
+	return true
+
+# --- the ready indicator ---
+
+# True when the next trigger pull would fire: no wait between shots, no reload, and rounds in the magazine.
+func shot_ready(weapon_id: String) -> bool:
+	return state == State.ACTIVE and _fire_cooldown <= 0.0 and reload_weapon == "" and loaded_rounds(weapon_id) >= int(WeaponData.DATA[weapon_id]["ammo_per_shot"])
+
+# How far the wait between shots has got, 0..1 (1 = the weapon is ready).
+func shot_progress() -> float:
+	return 1.0 if _cooldown_total <= 0.0 else clampf(1.0 - _fire_cooldown / _cooldown_total, 0.0, 1.0)
 
 # A snapshot of where the player is and what they hold, for studying routes and resource use.
 func _sample() -> void:
@@ -531,6 +680,7 @@ func _finish(outcome: String) -> void:
 	extracting = false
 	extract_zone = ""
 	threat_active = false
+	end_combo()
 	var items := _loot()
 	if outcome == "extracted":  # the raid difficulty scales what is kept (what is lost stays as it was)
 		for id in items:
@@ -538,13 +688,12 @@ func _finish(outcome: String) -> void:
 				items[id] = Difficulty.scale(int(items[id]), reward_mult)
 	_player.inventory.clear()  # kept loot goes to the profile, lost loot is gone
 	var saved := true
-	var points := 0  # attribute points earned (successful extracts only)
 	if profile != null:
 		for id in att_left:  # wear counts whether the raid was won or lost
 			profile.set_wear(id, att_left[id])
 		if outcome == "extracted":
 			profile.add_items(items)
-			points = profile.record_extract(_player.kills, reward_mult)
+			profile.record_extract()
 		profile.record_raid(outcome == "extracted", _player.kills, shots, shots_hit, depth + 1)
 		saved = profile.save()
 	var end_info := {"outcome": outcome, "loot": items, "kills": _player.kills, "shots": shots, "hits": shots_hit,
@@ -552,5 +701,5 @@ func _finish(outcome: String) -> void:
 	Telemetry.emit("raid.end.raid", end_info)
 	Telemetry.finish()
 	Telemetry.record_run(end_info)
-	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points, "reward_mult": reward_mult,
+	ended.emit({"outcome": outcome, "items": items, "saved": saved, "kills": _player.kills, "points": points_earned, "reward_mult": reward_mult, "score": score, "best_combo": best_combo,
 		"shots": shots, "hits": shots_hit, "duration": elapsed, "depth": depth})

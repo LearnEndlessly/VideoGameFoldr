@@ -3,6 +3,8 @@
 # smaller clip, and the rule that only the real save file is reset on launch.
 extends SceneTree
 
+const ZoneData = preload("res://data/enemies.gd")
+
 const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const Enemy = preload("res://scripts/enemy.gd")
@@ -21,6 +23,7 @@ func _check(ok: bool, message: String) -> void:
 		failures.append(message)
 
 func _init() -> void:
+	ZoneData.zones_enabled = false  # these tests count exact damage; tests/enemy_overhaul.gd covers the zones
 	await process_frame  # the tree is not running yet inside _init
 	await _run()
 	for f in failures:

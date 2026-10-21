@@ -19,3 +19,9 @@ const SHELTER_COLOR := Color(0.5, 0.4, 0.3)
 # door (within about 50 degrees of straight ahead, SHELTER_SCREEN_DIST metres out) to hide it.
 const SHELTER_SCREENS := 3
 const SHELTER_SCREEN_DIST := [7.0, 10.0]
+
+# Towers (watch platforms): a TOWER_SIZE square deck TOWER_HEIGHT m up on four legs, a rail on three sides and a ladder
+# on the fourth (scripts/ladder.gd). The deck sits above the cover, so it sees over it.
+const TOWER_SIZE := 3.2
+const TOWER_HEIGHT := 5.0
+const TOWER_COLOR := Color(0.45, 0.4, 0.35)

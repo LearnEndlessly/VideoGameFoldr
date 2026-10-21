@@ -27,7 +27,11 @@ func _init() -> void:
 		await process_frame  # _ready only runs once the tree is processing
 		var w: float = main.half_w * 2.0
 		var d: float = main.half_d * 2.0
-		if w < Tuning.MAP_MIN_SIDE - 1.0 or d < Tuning.MAP_MIN_SIDE - 1.0 or w > Tuning.MAP_MAX_SIDE + 1.0 or d > Tuning.MAP_MAX_SIDE + 1.0:
+		if main.map_type == "narrow":
+			var nt: Dictionary = Tuning.MAP_TYPES["narrow"]
+			if w < nt["width"][0] - 1.0 or w > nt["width"][1] + 1.0 or d < nt["length"][0] - 1.0 or d > nt["length"][1] + 1.0:
+				_fail(s, "narrow map size %.0fx%.0f is outside the allowed range" % [w, d])
+		elif w < Tuning.MAP_MIN_SIDE - 1.0 or d < Tuning.MAP_MIN_SIDE - 1.0 or w > Tuning.MAP_MAX_SIDE + 1.0 or d > Tuning.MAP_MAX_SIDE + 1.0:
 			_fail(s, "map size %.0fx%.0f is outside the allowed range" % [w, d])
 		if w > d * 1.3:
 			wide += 1
@@ -103,7 +107,7 @@ func _check_walkable(s: int, main) -> void:
 				if g.has_point(_cell_centre(cx, cy, hw, hd)):
 					blocked[cy * cols + cx] = 1
 
-	var start := _cell_of(Vector2.ZERO, hw, hd, cols)
+	var start := _cell_of(Vector2(main._start.x, main._start.z), hw, hd, cols)
 	if blocked[start] == 1:
 		_fail(s, "the player's start is blocked")
 		return

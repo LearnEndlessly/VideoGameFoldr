@@ -154,7 +154,7 @@ func _run() -> void:
 	for r in hub.map_info_rows():
 		info[r[0]] = r[1]
 	_check(info.size() == 5 and info["ENEMY BASES"] == str(hub.preview_data["spawners"].size()), "the display should list the map's numbers, got %s" % [info])
-	_check(hub.find_children("*", "Label3D", true, false).any(func(l): return l.text == "MAP 5"), "the display should show the map number")
+	_check(hub.find_children("*", "Label3D", true, false).any(func(l): return l.text.begins_with("MAP 5")), "the display should show the map number")
 	_check(not hub.find_children("*", "Label3D", true, false).any(func(l): return "PIT" in l.text), "no label should say pit")
 	base.queue_free()
 	await process_frame

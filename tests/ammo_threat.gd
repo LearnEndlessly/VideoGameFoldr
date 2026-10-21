@@ -3,6 +3,8 @@
 # enemy group count, and the threat clock (continuous, disabled, wave).
 extends SceneTree
 
+const ZoneData = preload("res://data/enemies.gd")
+
 const Main = preload("res://scripts/main.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Enemy = preload("res://scripts/enemy.gd")
@@ -15,6 +17,7 @@ func _check(ok: bool, message: String) -> void:
 		failures.append(message)
 
 func _init() -> void:
+	ZoneData.zones_enabled = false  # these tests count exact damage; tests/enemy_overhaul.gd covers the zones
 	await _run()
 	for f in failures:
 		printerr(f)

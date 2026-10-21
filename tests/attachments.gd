@@ -3,6 +3,8 @@
 # fitting them at the base, their effects and wear in a raid, breaking, and repair with scrap only.
 extends SceneTree
 
+const ZoneData = preload("res://data/enemies.gd")
+
 const Main = preload("res://scripts/main.gd")
 const Profile = preload("res://scripts/profile.gd")
 const Enemy = preload("res://scripts/enemy.gd")
@@ -20,6 +22,7 @@ func _check(ok: bool, message: String) -> void:
 		failures.append(message)
 
 func _init() -> void:
+	ZoneData.zones_enabled = false  # these tests count exact damage; tests/enemy_overhaul.gd covers the zones
 	await process_frame  # the tree is not running yet inside _init
 	await _run()
 	for f in failures:
@@ -214,7 +217,7 @@ func _run() -> void:
 	await process_frame
 	DirAccess.remove_absolute(PATH)
 
-	# The ammo depot: fit, remove and repair buttons.
+	# The gunsmith: fit, remove and repair buttons.
 	var depot := Profile.new(PATH)
 	depot.add_items({"att_speed_loader": 1, "scrap": 9})
 	depot.save()
@@ -224,16 +227,16 @@ func _run() -> void:
 	root.add_child(base)
 	await process_frame
 	var hub = base.get_children().filter(func(c): return "open_station" in c)[0]
-	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "armory")[0])
+	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "gunsmith")[0])
 	var texts: Array = hub._content.find_children("*", "Button", true, false).map(func(b): return b.text)
-	_check(texts.any(func(t): return t.begins_with("FIT")), "the depot should offer to fit the Speed Loader, buttons %s" % [texts])
+	_check(texts.any(func(t): return t.begins_with("FIT")), "the gunsmith should offer to fit the Speed Loader, buttons %s" % [texts])
 	hub._attach("pistol", "att_speed_loader")
 	hub.profile.set_wear("att_speed_loader", 50)
 	hub._refresh()
 	texts = hub._content.find_children("*", "Button", true, false).map(func(b): return b.text)
 	_check(texts.any(func(t): return t.begins_with("REPAIR")) and texts.has("REMOVE"), "a fitted attachment offers remove and repair, buttons %s" % [texts])
 	hub._repair("att_speed_loader")
-	_check(hub.profile.shots_left("att_speed_loader") == Attachments.DATA["att_speed_loader"]["durability"] and hub.profile.owned("scrap") == 9 - Attachments.REPAIR_SCRAP, "repairing at the depot spends scrap")
+	_check(hub.profile.shots_left("att_speed_loader") == Attachments.DATA["att_speed_loader"]["durability"] and hub.profile.owned("scrap") == 9 - Attachments.REPAIR_SCRAP, "repairing at the gunsmith spends scrap")
 	base.queue_free()
 	await process_frame
 	Main.show_start = false

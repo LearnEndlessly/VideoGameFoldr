@@ -73,7 +73,7 @@ func _run() -> void:
 		_check(main.extract_zones.size() == 2 and main.extract_pos == a["pos"], "seed %d: expected zones A and B, with extract_pos at A" % s)
 		_check(da >= Tuning.EXTRACT_A_MIN_PATH, "seed %d: A is %d m (path) from the start, minimum %s" % [s, da, Tuning.EXTRACT_A_MIN_PATH])
 		_check(db >= Tuning.EXTRACT_B_MIN_PATH and db <= Tuning.EXTRACT_B_MAX_PATH, "seed %d: B is %d m (path) from the start, window %s-%s" % [s, db, Tuning.EXTRACT_B_MIN_PATH, Tuning.EXTRACT_B_MAX_PATH])
-		_check(float(da) >= _flat(a["pos"], Vector3.ZERO) and float(db) >= _flat(b["pos"], Vector3.ZERO) - 1.0, "seed %d: a path cannot be shorter than a straight line" % s)
+		_check(float(da) >= _flat(a["pos"], main._start) and float(db) >= _flat(b["pos"], main._start) - 1.0, "seed %d: a path cannot be shorter than a straight line" % s)
 		_check(_flat(a["pos"], b["pos"]) >= Tuning.EXTRACT_MIN_SEPARATION, "seed %d: A and B are only %.1f m apart" % [s, _flat(a["pos"], b["pos"])])
 		for sp in main._spawners:
 			for z in [a, b]:
@@ -139,7 +139,7 @@ func _run() -> void:
 				break
 			await physics_frame
 		_check(raid.extracting and raid.extract_zone == id and raid.extract_elapsed > 0.2, "zone %s: standing in it should start the hold (zone %s, %.2f s)" % [id, raid.extract_zone, raid.extract_elapsed])
-		player.global_position = Vector3(0, 0, 0)
+		player.global_position = main._start
 		for i in 60:
 			if not raid.extracting:
 				break
@@ -149,12 +149,13 @@ func _run() -> void:
 	# Beams: visible within the reveal radius, hidden beyond it, unless the always-visible setting is on.
 	var apos: Vector3 = _zone(main, "A")["pos"]
 	var r: float = main.extract_cfg["beam_reveal_radius"]
-	player.global_position = apos + Vector3(r - 5.0, 0, 0)
+	var away: Vector3 = (apos - _zone(main, "B")["pos"]).normalized()  # stand on the side of A away from B
+	player.global_position = apos + away * (r - 5.0)
 	await process_frame
 	await process_frame
 	_check(main.beam_shown(_zone(main, "A")) and _zone(main, "A")["beam"].visible and _zone(main, "A")["label"].visible, "a beam within the reveal radius should show")
 	_check(not main.beam_shown(_zone(main, "B")) and not _zone(main, "B")["beam"].visible, "the far zone's beam should be hidden")
-	player.global_position = apos + Vector3(r + 5.0, 0, 0)
+	player.global_position = apos + away * (r + 5.0)
 	await process_frame
 	await process_frame
 	_check(not main.beam_shown(_zone(main, "A")) and not _zone(main, "A")["beam"].visible and not _zone(main, "A")["label"].visible, "a beam beyond the reveal radius should hide")
@@ -165,7 +166,7 @@ func _run() -> void:
 	main.extract_cfg["beam_always_visible"] = false
 
 	# Threat clock HUD.
-	player.global_position = Vector3.ZERO
+	player.global_position = main._start
 	var delay: float = raid.threat_delay
 	raid.elapsed = 0.0
 	var st: Dictionary = main.threat_hud_state()

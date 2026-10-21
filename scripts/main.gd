@@ -23,9 +23,12 @@ const Hub = preload("res://scripts/hub.gd")
 const UpgradePick = preload("res://scripts/upgrade_pick.gd")
 const PauseMenu = preload("res://scripts/pause_menu.gd")
 const Scope = preload("res://scripts/scope.gd")
+const ComboMeter = preload("res://scripts/combo_meter.gd")
+const ReadyRing = preload("res://scripts/ready_ring.gd")
 const Tracer = preload("res://scripts/tracer.gd")
 const Model = preload("res://scripts/model.gd")
 const Difficulty = preload("res://data/difficulty.gd")
+const Ladder = preload("res://scripts/ladder.gd")
 
 # Kenney Prototype Kit pieces (assets/) the map is built from. Collision stays the plain box; these are the looks.
 const WALL_MODEL := "res://assets/buildings/kenney_prototype_kit/wall.glb"
@@ -64,14 +67,19 @@ var extract_cfg := {"a_min_path": Tuning.EXTRACT_A_MIN_PATH, "b_min_path": Tunin
 	"min_base_distance": Tuning.EXTRACT_MIN_BASE_DISTANCE, "b_hold": Tuning.EXTRACT_B_HOLD_SECONDS,
 	"b_noise_radius": Tuning.EXTRACT_B_NOISE_RADIUS, "beam_reveal_radius": Tuning.EXTRACT_BEAM_REVEAL_RADIUS,
 	"beam_always_visible": Tuning.EXTRACT_BEAM_ALWAYS_VISIBLE, "threat_tick": Tuning.THREAT_EXTRACT_TICK}
+var map_type := "open"  # "open" or "narrow" (Tuning.MAP_TYPES)
 var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
+var towers: Array = []  # {"pos", "ladder", "top"} of each watch tower
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
 var shelters: Array = []  # Vector3 centres of the safe nooks
 var blocks: Array = []  # [size, centre, colour] of every box added, for the base's map table
 var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
 var _seed := 0
+var _start := Vector3.ZERO  # where the player starts: the centre, or near one end of a narrow map
+var _zone_label: Label  # "HEADSHOT" / "ARMORED" under the crosshair after a hit
+var _zone_time := 0.0
 var _last_tick := -1  # whole second of the extract timer last ticked
 var _gap := 3.0  # this map's minimum walkable gap between objects, rolled per map (Tuning.PATH_GAP_RANGE)
 var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep walkable gaps
@@ -82,7 +90,6 @@ var _spawners: Array = []  # the enemy bases (Spawner); each is freed when destr
 var _legacy_pad := Vector3.ZERO  # where the old single extract zone used to go; still kept clear (see _reserve_legacy_extract_pad)
 # HUD nodes are created in _build_raid so the start screen doesn't leave orphans.
 var _hud: Label
-var _help: Label
 var _feed: VBoxContainer  # recent pickups, each with its symbol
 var _extract_box: VBoxContainer
 var _extract_label: Label
@@ -100,6 +107,8 @@ var _stats_label: Label
 var _ammo_bar: Control
 var _ammo_label: Label
 var _cross: Control
+var _ring: Control  # the ready indicator around the crosshair (slow weapons)
+var _combo: Control  # the kill combo counter
 var _reload_tip: Label  # "R to reload" under the crosshair
 
 func _ready() -> void:
@@ -130,6 +139,7 @@ func _build_hub() -> void:
 # enemy bases, shelters and cover. Needs no scene tree, so preview() can run it.
 func _build_map() -> void:
 	_roll_map_size()
+	_roll_map_type()
 	_gap = rng.randf_range(Tuning.PATH_GAP_RANGE[0], Tuning.PATH_GAP_RANGE[1])
 	var wall_color := Color(0.4, 0.4, 0.45)
 	_add_box(Vector3(half_w * 2.0, 1, half_d * 2.0), Vector3(0, -0.5, 0), Color(0.3, 0.5, 0.3), FLOOR_MODEL)
@@ -140,8 +150,9 @@ func _build_map() -> void:
 	# Order matters: the big fixed things go in first (they may overlap if the map is too
 	# small), then shelters with their screening cover, then general cover fills whatever
 	# space is left, skipping what doesn't fit with a walkable gap.
-	_taken.append([Vector3.ZERO, 2.5, 2.5])  # player start
+	_taken.append([_start, 2.5, 2.5])  # player start
 	_reserve_legacy_extract_pad()
+	_place_gates()  # first on a narrow map, so everything else is placed around the walls
 	for id in LootZones.DATA:
 		_add_structure(id, LootZones.DATA[id])
 	for g in Tuning.ENEMY_GROUP_COUNT:
@@ -158,6 +169,7 @@ func _build_map() -> void:
 	for i in Tuning.SPAWNER_COUNT:
 		_place_spawner(i)
 	_place_shelters()
+	_place_towers()
 	var mix := {}  # this map's own cover mix: each type's weight scaled by a random factor
 	for k in Scenery.COVER_TYPES:
 		mix[k] = maxi(1, int(round(float(Scenery.COVER_TYPES[k]["weight"]) * 10.0 * rng.randf_range(Tuning.COVER_MIX_RANGE[0], Tuning.COVER_MIX_RANGE[1]))))
@@ -191,13 +203,14 @@ func _build_raid() -> void:
 	add_child(env)
 
 	_player = Player.new()
+	_player.position = _start
 	add_child(_player)
 	_player.pause_requested.connect(_open_pause)
 	_player.apply_profile(profile)  # the base's upgrades: attributes and the starting weapon
 	raid = Raid.new()
 	raid.profile = profile
 	raid.reload_seconds = Tuning.RELOAD_SECONDS * profile.reload_mult()
-	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"] + Tuning.DEPTH_AMMO_BONUS * depth
+	raid.start_ammo = Difficulty.values(profile.difficulty)["ammo"] + Tuning.DEPTH_AMMO_BONUS * depth + int(profile.bonus("start_ammo"))
 	raid.reward_mult = profile.reward_mult() + Tuning.DEPTH_REWARD_BONUS * depth
 	raid.drop_mult = 1.0 + Tuning.DEPTH_DROP_BONUS * depth
 	raid.depth = depth
@@ -222,8 +235,17 @@ func _build_raid() -> void:
 	raid.dry_fire.connect(func(): Sfx.play("empty"))
 	raid.threat_started.connect(_on_threat_started)
 	raid.bullet_traced.connect(_on_bullet)
+	raid.zone_hit.connect(_on_zone_hit)
+	raid.combo_kill.connect(func(_count: int): _combo.bump())
+	raid.combo_ended.connect(func(count: int, bonus: int):
+		if count >= 2:
+			_combo.show_paid("COMBO x%d  +%d" % [count, bonus]))
+	raid.point_earned.connect(func():
+		_banner.text = "NEW ATTRIBUTE POINT AT THE CHARACTER SCREEN\nRound %d cleared" % raid.round_number()
+		_banner_time = 7.0
+		Sfx.play("pickup"))
 	raid.attachment_broke.connect(func(attachment_name: String):
-		_banner.text = "%s BROKE\nRepair it with scrap at the ammo depot" % attachment_name.to_upper()
+		_banner.text = "%s BROKE\nRepair it with scrap at the gunsmith" % attachment_name.to_upper()
 		_banner_time = 5.0
 		Sfx.play("deny"))
 	for z in extract_zones:
@@ -239,15 +261,6 @@ func _build_raid() -> void:
 	_hud.position = Vector2(16, 16)
 	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART  # a narrow left column, clear of the extract bar in the middle
 	_hud.custom_minimum_size = Vector2(420, 0)
-	_help = Label.new()  # controls hint along the bottom edge, wrapped so it never runs off screen
-	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_help.custom_minimum_size = Vector2(900, 0)
-	_help.modulate = Color(1, 1, 1, 0.75)
-	layer.add_child(_help)
-	_help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	_help.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_help.offset_left = 16
-	_help.offset_bottom = -12
 	layer.add_child(_hud)
 	_feed = VBoxContainer.new()
 	_feed.position = Vector2(16, 110)
@@ -259,6 +272,26 @@ func _build_raid() -> void:
 	_cross.fov = _player._cam.fov
 	layer.add_child(_cross)
 	_cross.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_ring = ReadyRing.new()
+	layer.add_child(_ring)
+	_ring.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_zone_label = Label.new()
+	_zone_label.add_theme_font_size_override("font_size", 22)
+	_zone_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_zone_label.visible = false
+	layer.add_child(_zone_label)
+	_zone_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_zone_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_zone_label.offset_top = 90
+	_combo = ComboMeter.new()
+	_combo.visible = false
+	layer.add_child(_combo)
+	_combo.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_combo.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_combo.offset_left = -210
+	_combo.offset_right = -16
+	_combo.offset_top = 56
+	_combo.offset_bottom = 152
 	_build_extract_hud(layer)
 	_build_status_hud(layer)
 	_banner = Label.new()
@@ -326,10 +359,10 @@ func _build_status_hud(layer: CanvasLayer) -> void:
 	top.add_child(_xp_bar)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(top)
-	top.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)  # above the controls hint
+	top.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)  # bottom left corner
 	top.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	top.offset_left = 16
-	top.offset_bottom = -100
+	top.offset_bottom = -16
 
 	var ammo := VBoxContainer.new()
 	ammo.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -373,20 +406,40 @@ func _update_status_hud() -> void:
 	_hp_bar.max_value = _player.max_health
 	_hp_bar.value = _player.health
 	_xp_bar.value = raid.xp_fraction()
-	_stats_label.text = "DEPTH %d   LV %d   HP %d   FRAGS %d   SHOTS %d" % [depth + 1, raid.raid_level(), _player.health, _player.kills, raid.shots]
-	_ammo_bar.total = w["clip"]
+	_stats_label.text = "DEPTH %d   LV %d   HP %d   FRAGS %d   SHOTS %d   SCORE %d" % [depth + 1, raid.raid_level(), _player.health, _player.kills, raid.shots, raid.score]
+	_ammo_bar.total = raid.clip_size(id)
 	_ammo_bar.filled = shown
 	_cross.spread = w["spread"]
 	_cross.fov = _player._cam.fov
 	_cross.visible = not _player.scoped
 	_scope.shown = _player.scoped
-	_reload_tip.visible = shown * 5 <= int(w["clip"]) and held > shown and raid.reload_weapon != id
+	_update_ready_ring(id, w, shown, held)
+	_combo.count = raid.combo
+	_combo.fraction = raid.combo_left / maxf(raid.combo_total, 0.01)
+	_combo.pending = "+%d  x%.2f" % [raid.combo_payout(), raid.combo_mult(raid.combo)]
+	_reload_tip.visible = shown * 5 <= raid.clip_size(id) and held > shown and raid.reload_weapon != id
 	var note := ""
 	if raid.reload_weapon == id:
 		note = "  RELOADING..."
 	elif held < w["ammo_per_shot"]:
 		note = "  NO AMMO"
 	_ammo_label.text = "%d / %d%s" % [shown, maxi(held - shown, 0), note]
+
+# The ring around the crosshair for slow weapons ("ready" in data/weapons.gd): orange and filling while the next shot is
+# not ready, green when it is; around the scope's centre while scoped in.
+func _update_ready_ring(id: String, w: Dictionary, shown: int, held: int) -> void:
+	_ring.shown = bool(w.get("ready", false))
+	if not _ring.shown:
+		return
+	var reloading: bool = raid.reload_weapon == id
+	_ring.empty = held < int(w["ammo_per_shot"]) and not reloading
+	_ring.is_ready = raid.shot_ready(id)
+	if reloading:
+		_ring.fraction = _player.reload_progress()
+	else:
+		_ring.fraction = raid.shot_progress() if shown >= int(w["ammo_per_shot"]) else 0.0  # an empty magazine waits for R
+	var cone := tan(float(w["spread"])) / tan(deg_to_rad(_player._cam.fov) / 2.0) * get_viewport().get_visible_rect().size.y / 2.0
+	_ring.radius = 44.0 if _player.scoped else maxf(cone, 12.0) + 12.0
 
 func _process(_d: float) -> void:
 	if raid == null:
@@ -397,12 +450,13 @@ func _process(_d: float) -> void:
 		else:
 			_open_pick()
 	_banner_time = maxf(_banner_time - _d, 0.0)
+	_zone_time = maxf(_zone_time - _d, 0.0)
+	_zone_label.visible = _zone_time > 0.0
 	_banner.visible = _banner_time > 0.0
 	var hold := raid.hold_seconds_for(raid.extract_zone) if raid.extracting else raid.hold_seconds
 	_update_status_hud()
 	_hud.text = "%s %s\n%s%s" % ["[SAFE]" if _player.safe else "", raid.powerup_text(), _enemy_status(), ("\n" + raid.attachment_text()) if raid.attachment_text() != "" else ""]
 	_update_threat_hud()
-	_help.text = "WASD move, Shift sprint (loud!), Space jump, LMB shoot, hold RMB to zoom, R reload, E open crate, Tab backpack, Esc pause and controls. Crates are only in the small walled rooms. Extract at the green zone (safe route, %.0f s) or the amber one (fast route, %.0f s, alerts patrols near it)." % [raid.hold_seconds_for("A"), raid.hold_seconds_for("B")]
 	for z in extract_zones:
 		var shown := beam_shown(z)
 		z["beam"].visible = shown
@@ -468,6 +522,16 @@ func _update_threat_hud() -> void:
 		var b := nearest_extract_bearing()
 		_tick.angle = b["angle"]
 		_tick.text = "%s %.0f m" % ["SAFE" if b["zone"]["id"] == "A" else "FAST", b["distance"]]
+
+# A shot landed on an enemy: say so when it hit a weak point or the armor.
+func _on_zone_hit(zone: String) -> void:
+	match zone:
+		"head": _zone_label.text = "HEADSHOT"
+		"back": _zone_label.text = "WEAK POINT"
+		"front": _zone_label.text = "ARMORED"
+		_: return
+	_zone_label.add_theme_color_override("font_color", Enemies.STRONG_COLOR.lightened(0.3) if zone == "front" else Enemies.WEAK_COLOR)
+	_zone_time = 0.5
 
 # One pellet's flight, from the muzzle to where it landed.
 func _on_bullet(weapon_id: String, end: Vector3, normal: Vector3, kind: String) -> void:
@@ -631,7 +695,7 @@ func preview(map_seed: int) -> Dictionary:
 			groups[c.home] = true
 	var data := {"w": m.half_w * 2.0, "d": m.half_d * 2.0, "blocks": m.blocks, "extract": m.extract_pos, "extracts": m.extract_zones.map(func(z): return {"id": z["id"], "pos": z["pos"]}),
 		"spawners": m._spawners.map(func(sp): return sp.position), "groups": groups.keys(),
-		"rooms": m.structures.size(), "cover": m._cover.size()}
+		"rooms": m.structures.size(), "cover": m._cover.size(), "type": m.map_type}
 	m.free()
 	return data
 
@@ -674,7 +738,7 @@ func _map_info() -> Dictionary:
 			enemies.append({"id": c.stats["type"], "mod": c.stats["modifier"], "group": c.group_id, "pos": c.position})
 		elif c.is_in_group("lootable"):
 			crates.append({"zone": c.zone_id, "pos": c.position})
-	return {"w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
+	return {"type": map_type, "w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
 		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
 
 # An enemy base: a small footprint reserved like a group, far from the start. See scripts/spawner.gd.
@@ -698,6 +762,83 @@ func _roll_map_size() -> void:
 	var d := clampf(Tuning.MAP_AREA / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
 	half_w = roundf(w) / 2.0
 	half_d = roundf(d) / 2.0
+
+# Rolls the map's type from a stream of its own, so an open map is the map its seed always made. A narrow map is a
+# long thin lane: the player starts near one end and the safe extract is far down the other.
+func _roll_map_type() -> void:
+	var trng := RandomNumberGenerator.new()
+	trng.seed = ("maptype:%d" % rng.seed).hash()
+	map_type = Rng.pick(Tuning.MAP_TYPES, trng)
+	if map_type != "narrow":
+		return
+	var t: Dictionary = Tuning.MAP_TYPES["narrow"]
+	half_w = roundf(trng.randf_range(t["width"][0], t["width"][1])) / 2.0
+	half_d = roundf(trng.randf_range(t["length"][0], t["length"][1])) / 2.0
+	_start = Vector3(0, 0, half_d - float(t["start_inset"]))
+	extract_cfg["a_min_path"] = maxf(float(extract_cfg["a_min_path"]), half_d * 1.4)
+
+# Narrow maps: a wall across the lane every gate_every m with a gap, the gap on alternating sides. A gate that does
+# not fit among what is already placed (the start, the old extract pad) is skipped.
+func _place_gates() -> void:
+	if map_type != "narrow":
+		return
+	var t: Dictionary = Tuning.MAP_TYPES["narrow"]
+	var gap: float = t["gap"]
+	var left := rng.randi_range(0, 1) == 0
+	var z: float = _start.z - float(t["gate_first"])
+	while z > -half_d + float(t["gate_first"]) * 0.5:
+		var gap_x := half_w * 0.45 * (-1.0 if left else 1.0)
+		var pieces := [[-half_w, gap_x - gap / 2.0], [gap_x + gap / 2.0, half_w]]
+		var fits := _is_clear(Vector3(gap_x, 0, z), gap / 2.0, 0.5)
+		for pc in pieces:
+			fits = fits and _is_clear(Vector3((pc[0] + pc[1]) / 2.0, 0, z), (pc[1] - pc[0]) / 2.0, 0.5)
+		if fits:
+			_taken.append([Vector3(gap_x, 0, z), gap / 2.0, 0.5])
+			for pc in pieces:
+				var wlen: float = pc[1] - pc[0]
+				var c := Vector3((pc[0] + pc[1]) / 2.0, 0, z)
+				_taken.append([c, wlen / 2.0, 0.5])
+				_add_box(Vector3(wlen, 3.5, 1.0), c + Vector3(0, 1.75, 0), Color(0.45, 0.43, 0.42), WALL_MODEL)
+		left = not left
+		z -= float(t["gate_every"])
+
+# Watch towers, from a stream of their own (so the cover is the cover the seed always made, minus the room they take).
+func _place_towers() -> void:
+	var trng := RandomNumberGenerator.new()
+	trng.seed = ("towers:%d" % rng.seed).hash()
+	var map_rng := rng
+	rng = trng
+	for i in Tuning.TOWER_COUNT:
+		var p = _free_spot(2.7, 2.7, 10.0, false)
+		if p != null:
+			_add_tower(p, rng.randi_range(0, 3))
+	rng = map_rng
+
+# A deck on four legs with a rail on three sides and a ladder up the fourth (`ladder_side`, see _side_normal).
+func _add_tower(pos: Vector3, ladder_side: int) -> void:
+	var size: float = Scenery.TOWER_SIZE
+	var h: float = Scenery.TOWER_HEIGHT
+	var half := size / 2.0
+	var color: Color = Scenery.TOWER_COLOR
+	_add_box(Vector3(size, 0.3, size), pos + Vector3(0, h - 0.15, 0), color, FLOOR_MODEL)
+	for cx in [-1.0, 1.0]:
+		for cz in [-1.0, 1.0]:
+			_add_box(Vector3(0.3, h - 0.3, 0.3), pos + Vector3(cx * (half - 0.15), (h - 0.3) / 2.0, cz * (half - 0.15)), color)
+	for s in 4:
+		if s == ladder_side:
+			continue
+		var sn := _side_normal(s)
+		var rail := Vector3(size, 1.0, 0.15) if absf(sn.z) > 0.5 else Vector3(0.15, 1.0, size)
+		_add_box(rail, pos + sn * (half - 0.075) + Vector3(0, h + 0.5, 0), color)
+	var n := _side_normal(ladder_side)
+	var ladder := Ladder.new()
+	ladder.top_y = h + 0.1
+	ladder.height = h + 0.2
+	ladder.facing = -n
+	ladder.position = pos + n * (half + 0.05)
+	ladder.rotation.y = atan2(n.x, n.z)  # local +Z is outward
+	add_child(ladder)
+	towers.append({"pos": pos, "ladder": ladder, "top": h})
 
 # A random point where a footprint of half-size (hx, hz) stays PATH_GAP away from the outer wall.
 func _random_point(hx: float, hz: float) -> Vector3:
@@ -723,7 +864,7 @@ func _free_spot(hx: float, hz: float, min_origin: float, overlap_ok := true):
 	var tries := 0
 	for i in 1000:
 		p = _random_point(hx, hz)
-		if p.length() < min_origin:
+		if (p - _start).length() < min_origin:
 			continue
 		tries += 1
 		if _is_clear(p, hx, hz):
@@ -750,7 +891,7 @@ func _guard_spots(center: Vector3, size: float, side: int) -> Array:
 	for a in 25:
 		for d in 5:
 			var p := door + n.rotated(Vector3.UP, -1.2 + a * 0.1) * (Tuning.GUARD_DISTANCE + d)
-			if p.length() >= Tuning.ENEMY_GROUP_MIN_ORIGIN and _inside_map(p, 3.5) and _is_clear(p, 3.5, 3.5):
+			if (p - _start).length() >= Tuning.ENEMY_GROUP_MIN_ORIGIN and _inside_map(p, 3.5) and _is_clear(p, 3.5, 3.5):
 				spots.append(p)
 	return spots
 
@@ -771,7 +912,7 @@ func _place_cover(at = null, mix := {}) -> void:
 	if at == null:
 		p = _free_spot(hx, hz, 6.0, false)
 	elif absf(at.x) <= half_w - hx - _gap and absf(at.z) <= half_d - hz - _gap \
-			and at.length() >= 6.0 and _is_clear(at, hx, hz):
+			and (at - _start).length() >= 6.0 and _is_clear(at, hx, hz):
 		p = at
 		_taken.append([p, hx, hz])
 	if p == null:
@@ -1010,7 +1151,7 @@ func _walk_grid() -> Dictionary:
 	var dist := PackedInt32Array()
 	dist.resize(cols * rows)
 	dist.fill(-1)
-	var start := clampi(int(floor(half_w)), 0, cols - 1) + clampi(int(floor(half_d)), 0, rows - 1) * cols
+	var start := clampi(int(floor(half_w + _start.x)), 0, cols - 1) + clampi(int(floor(half_d + _start.z)), 0, rows - 1) * cols
 	dist[start] = 0
 	var queue: Array = [start]
 	var head := 0

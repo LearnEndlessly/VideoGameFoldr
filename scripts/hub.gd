@@ -3,7 +3,8 @@ extends Node3D
 # while looking at it:
 #   STASH       the loot kept from raids
 #   AMMO DEPOT  choose the starting weapon (the only weapon taken into a raid)
-#   CHARACTER   spend attribute points (speed, constitution, weapon handling)
+#   GUNSMITH    fit looted attachments to weapons (each adds to damage, fire rate, reload or zoom), remove them, repair them with scrap
+#   CHARACTER   spend attribute points: 35 attributes, up to 5 levels each and 15 points in all (data/upgrades.gd)
 #   MAP PIT     a miniature of the next raid's map seen from above through a glass cover; panels hovering
 #               over it (shoot them) change the map number
 #   RAID TERMINAL  the button that starts a raid on the map in the pit
@@ -20,6 +21,7 @@ const Tuning = preload("res://data/tuning.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 const UIKit = preload("res://scripts/ui_kit.gd")
 const Attachments = preload("res://data/attachments.gd")
+const Model = preload("res://scripts/model.gd")
 
 const HALF_W := 9.0
 const HALF_D := 7.0
@@ -34,12 +36,13 @@ const STATIONS := {
 	"raid": {"panel_only": true, "name": "RAID TERMINAL", "pos": Vector3(0, 0, -HALF_D + 1.0), "size": Vector3(3.0, 1.6, 0.8), "color": Color(0.2, 0.8, 0.3)},
 	"stash": {"name": "STASH", "pos": Vector3(0, 0, HALF_D - 1.0), "size": Vector3(2.6, 1.2, 1.0), "color": Color(0.35, 0.45, 0.75)},
 	"armory": {"name": "AMMO DEPOT", "pos": Vector3(-HALF_W + 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.85, 0.55, 0.2)},
+	"gunsmith": {"name": "GUNSMITH", "pos": Vector3(-HALF_W + 1.0, 0, 4.6), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.6, 0.62, 0.68)},
 	"character": {"name": "CHARACTER", "pos": Vector3(HALF_W - 1.0, 0, 0), "size": Vector3(1.0, 1.2, 2.6), "color": Color(0.75, 0.35, 0.7)},
 	"map": {"name": "MAP", "pos": Vector3(0, 0, 0), "size": Vector3(PIT.x, 0.06, PIT.y), "y": -0.03, "color": Color(0.7, 0.85, 1.0, 0.05)},
 }
 const STATION_TAGLINES := {
 	"raid": "pick your risk and deploy", "stash": "what you brought home", "armory": "choose your starting weapon",
-	"character": "train your operator", "map": "choose the next battlefield",
+	"gunsmith": "fit, remove and repair attachments", "character": "train your operator", "map": "choose the next battlefield",
 }
 # Panels hovering over the map pit, in view while looking at the map: shoot them (or press E close up) to change the map.
 const MAP_BUTTONS := {
@@ -67,6 +70,8 @@ var _panel: PanelContainer
 var _head: VBoxContainer  # the open panel's header
 var _content: VBoxContainer
 var _status: Label
+var _column: VBoxContainer  # the open panel's column; wider for the character screen
+var _scroll: ScrollContainer  # the character screen's list: kept where it was when a point is spent
 
 func _ready() -> void:
 	_build_room()
@@ -178,6 +183,14 @@ func _add_station(id: String) -> void:
 	body.set_meta("station_id", id)
 	if id == "map":
 		return
+	if id == "gunsmith":  # the parts it works on, lying on the bench
+		for i in Attachments.DATA.size():
+			var part := Model.load_scene(Attachments.DATA.values()[i].get("model", ""))
+			if part != null:
+				part.position = Vector3(0, size.y / 2.0 + 0.02, (i - (Attachments.DATA.size() - 1) / 2.0) * 0.6)
+				part.rotation_degrees.y = 90.0
+				part.scale = Vector3.ONE * 2.0
+				body.add_child(part)
 	var label := Label3D.new()
 	label.text = d["name"]
 	label.font_size = 48
@@ -358,7 +371,7 @@ func _display_label(parent: Node3D, text: String, x: float, y: float, size: int,
 	return l
 
 func _update_map_display() -> void:
-	_map_title.text = "MAP %d" % selected_seed
+	_map_title.text = "MAP %d%s" % [selected_seed, "  NARROW" if preview_data.get("type", "open") == "narrow" else ""]
 	var rows := map_info_rows()
 	for i in _map_values.size():
 		_map_values[i].text = rows[i][1] if i < rows.size() else ""
@@ -435,6 +448,7 @@ func _build_ui() -> void:
 	_panel.visible = false
 	center.add_child(_panel)
 	var box := VBoxContainer.new()
+	_column = box
 	box.custom_minimum_size = Vector2(760, 0)
 	box.add_theme_constant_override("separation", 12)
 	_panel.add_child(box)
@@ -460,6 +474,8 @@ func _on_station_used(station: Node) -> void:
 func _open_panel(id: String) -> void:
 	open_station = id
 	_status.text = ""
+	_scroll = null
+	_column.custom_minimum_size.x = 940.0 if id == "character" else 760.0
 	var accent: Color = STATIONS[open_station]["color"]
 	accent.a = 1.0
 	_panel.theme = UIKit.theme(accent)
@@ -483,15 +499,19 @@ func _hide_panel() -> void:
 	_panel.visible = false
 
 func _refresh() -> void:
+	var kept := _scroll.scroll_vertical if is_instance_valid(_scroll) else 0
 	for c in _content.get_children():
 		_content.remove_child(c)
 		c.queue_free()
 	match open_station:
 		"stash": _fill_stash()
 		"armory": _fill_armory()
+		"gunsmith": _fill_gunsmith()
 		"character": _fill_character()
 		"map": _fill_map()
 		"raid": _fill_raid()
+	if is_instance_valid(_scroll) and kept > 0:
+		_scroll.set_deferred("scroll_vertical", kept)
 
 # Saves after any change; tells the player if it failed.
 func _commit() -> void:
@@ -565,8 +585,7 @@ func _fill_stash() -> void:
 
 func _fill_armory() -> void:
 	var a := _accent()
-	_label("SCRAP  %d   (the only thing that repairs attachments: %d each)" % [profile.owned("scrap"), Attachments.REPAIR_SCRAP], 13, UIKit.DIM)
-	_label("Pick the one weapon you take into raids. Weapon and character upgrades are won during a raid and are lost when it ends.", 13, UIKit.DIM)
+	_label("Pick the one weapon you take into raids. Weapon and character upgrades are won during a raid and are lost when it ends. Attachments are fitted at the gunsmith.", 13, UIKit.DIM)
 	var most := {"damage": 1.0, "clip": 1.0, "range": 1.0}  # the best of each stat, so the meters compare weapons
 	for id in WeaponData.DATA:
 		var w: Dictionary = WeaponData.DATA[id]
@@ -596,16 +615,64 @@ func _fill_armory() -> void:
 		var equip := _button(v, "STARTING WEAPON" if equipped else "TAKE INTO RAIDS", _equip.bind(id), equipped)
 		if equipped:
 			UIKit.mark_chosen(equip, a)
+
+# The weapon's stats as numbers, bare and with its working attachment: damage per hit, shots per second, reload
+# seconds and zoom (magnification against the unzoomed view). Each is [bare, with].
+func weapon_stats(weapon_id: String) -> Dictionary:
+	var w: Dictionary = WeaponData.DATA[weapon_id]
+	var att: String = profile.attached.get(weapon_id, "")
+	var d: Dictionary = Attachments.DATA[att] if att != "" and not profile.is_broken(att) else {}
+	var reload: float = Tuning.RELOAD_SECONDS * profile.reload_mult()
+	var base_zoom: float = tan(deg_to_rad(Player.BASE_FOV) / 2.0) / tan(deg_to_rad(float(w["zoom_fov"])) / 2.0)
+	var zoom: float = tan(deg_to_rad(Player.BASE_FOV) / 2.0) / tan(deg_to_rad(float(w["zoom_fov"]) * float(d.get("zoom", 1.0))) / 2.0)
+	return {
+		"damage": [float(w["damage"]), float(w["damage"]) * float(d.get("damage", 1.0))],
+		"rate": [1.0 / float(w["cooldown"]), 1.0 / (float(w["cooldown"]) * float(d.get("cooldown", 1.0)))],
+		"reload": [reload, reload * float(d.get("reload", 1.0))],
+		"zoom": [base_zoom, zoom],
+	}
+
+func _fill_gunsmith() -> void:
+	var a := _accent()
+	var top := _row()
+	top.add_child(UIKit.tile("scrap", str(profile.owned("scrap")), a, UIKit.AMBER))
+	top.add_child(UIKit.tile("repair costs", "%d scrap" % profile.repair_cost(), a))
+	_label("Attachments are super rare drops. Fit one to a weapon and it adds to the weapon's damage, fire rate, reload or zoom until it wears out (every shot wears it). Scrap, looted from enemies, is the only thing that repairs it.", 13, UIKit.DIM)
+	var cards := _row(null, 12)
+	for id in WeaponData.DATA:
+		var card := PanelContainer.new()
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a, 6, 14))
+		cards.add_child(card)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 6)
+		card.add_child(v)
+		v.add_child(UIKit.label(str(WeaponData.DATA[id]["name"]).to_upper(), 24, UIKit.TEXT, true))
+		var stats := weapon_stats(id)
+		for row in [["DAMAGE", "damage", "%d"], ["FIRE RATE", "rate", "%.1f/s"], ["RELOAD", "reload", "%.2fs"], ["ZOOM", "zoom", "x%.1f"]]:
+			var pair: Array = stats[row[1]]
+			var better: bool = not is_equal_approx(pair[0], pair[1])
+			var line := _row(v)
+			var cap := UIKit.label(row[0], 12, UIKit.DIM)
+			cap.custom_minimum_size = Vector2(70, 0)
+			line.add_child(cap)
+			line.add_child(UIKit.label(row[2] % pair[0], 14, UIKit.DIM if better else UIKit.TEXT))
+			if better:
+				line.add_child(UIKit.label("> " + row[2] % pair[1], 14, UIKit.GOOD, true))
 		_attachment_slot(v, id, a)
 
 # The weapon's attachment slot: what is fitted and how worn it is, with remove and repair; or a button per spare
-# attachment in the stash. (No attachments owned, nothing shown.)
+# attachment in the stash.
 func _attachment_slot(v: VBoxContainer, weapon_id: String, a: Color) -> void:
 	var att: String = profile.attached.get(weapon_id, "")
 	if att == "":
+		var any := false
 		for id in Attachments.DATA:
 			if profile.can_attach(weapon_id, id):
+				any = true
 				_button(v, "FIT  %s" % str(Attachments.DATA[id]["name"]).to_upper(), _attach.bind(weapon_id, id))
+		if not any:
+			v.add_child(UIKit.label("no attachment fitted", 12, UIKit.DIM))
 		return
 	var d: Dictionary = Attachments.DATA[att]
 	var left: int = profile.shots_left(att)
@@ -613,13 +680,13 @@ func _attachment_slot(v: VBoxContainer, weapon_id: String, a: Color) -> void:
 	v.add_child(UIKit.label("%s%s" % [str(d["name"]).to_upper(), "   BROKEN" if broken else ""], 13, UIKit.BAD if broken else UIKit.AMBER))
 	var line := _row(v)
 	var cap := UIKit.label("WEAR", 12, UIKit.DIM)
-	cap.custom_minimum_size = Vector2(62, 0)
+	cap.custom_minimum_size = Vector2(70, 0)
 	line.add_child(cap)
 	line.add_child(UIKit.meter(float(left) / float(d["durability"]), UIKit.BAD if broken else a, 90))
 	line.add_child(UIKit.label("%d" % left, 13))
 	v.add_child(UIKit.label(d["desc"], 11, UIKit.DIM))
 	_button(v, "REMOVE", _detach.bind(weapon_id))
-	_button(v, "REPAIR  %d SCRAP" % Attachments.REPAIR_SCRAP, _repair.bind(att), left >= int(d["durability"]) or profile.owned("scrap") < Attachments.REPAIR_SCRAP)
+	_button(v, "REPAIR  %d SCRAP" % profile.repair_cost(), _repair.bind(att), left >= int(d["durability"]) or profile.owned("scrap") < profile.repair_cost())
 
 func _attach(weapon_id: String, att: String) -> void:
 	if profile.attach(weapon_id, att):
@@ -639,29 +706,55 @@ func _fill_character() -> void:
 	top.add_child(UIKit.label(str(profile.points), 56, UIKit.AMBER, true))
 	var cap := VBoxContainer.new()
 	cap.alignment = BoxContainer.ALIGNMENT_CENTER
+	cap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(cap)
 	cap.add_child(UIKit.label("ATTRIBUTE POINTS", 18, UIKit.TEXT, true))
-	cap.add_child(UIKit.label("%d per extract, +1 for every %d frags in it, at most %d per raid" % [Upgrades.POINTS_PER_EXTRACT, Upgrades.KILLS_PER_POINT, Upgrades.POINTS_PER_RAID_MAX], 12, UIKit.DIM))
-	for id in Upgrades.ATTRS:
-		var at: Dictionary = Upgrades.ATTRS[id]
-		var level: int = profile.attr_level(id)
-		var card := PanelContainer.new()
-		card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a, 5, 12))
-		_content.add_child(card)
-		var line := _row(card, 14)
-		var names := VBoxContainer.new()
-		names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		line.add_child(names)
-		names.add_child(UIKit.label(str(at["name"]).to_upper(), 20, UIKit.TEXT, true))
-		names.add_child(UIKit.label(at["desc"], 12, UIKit.DIM))
-		line.add_child(UIKit.pips(level, int(at["max"]), a))
-		var plus := _button(line, "+", _spend.bind(id), profile.points <= 0 or level >= int(at["max"]))
-		plus.custom_minimum_size = Vector2(48, 40)
-	var sums := _row()
-	sums.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a))
-	sums.add_child(UIKit.tile("armor", "%.0f%%" % (profile.armor() * 100.0), a))
-	sums.add_child(UIKit.tile("speed", "x%.2f" % profile.speed_mult(), a))
-	sums.add_child(UIKit.tile("reload", "x%.2f" % profile.reload_mult(), a))
+	var how := UIKit.label("A point for every %d rounds cleared (kill every enemy, destroy every enemy base). Each attribute takes up to %d levels, and %d points can be spent in all." % [Upgrades.ATTR_ROUNDS_PER_POINT, Upgrades.ATTR_LEVEL_MAX, Upgrades.ATTR_TOTAL_MAX], 12, UIKit.DIM)
+	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	how.custom_minimum_size = Vector2(430, 0)
+	cap.add_child(how)
+	top.add_child(UIKit.tile("spent", "%d / %d" % [profile.attr_total(), Upgrades.ATTR_TOTAL_MAX], a, UIKit.TEXT, 100))
+	top.add_child(UIKit.tile("health", str(profile.max_health(Player.MAX_HEALTH)), a, UIKit.TEXT, 90))
+	top.add_child(UIKit.tile("armor", "%.0f%%" % (profile.armor() * 100.0), a, UIKit.TEXT, 90))
+	_scroll = ScrollContainer.new()
+	_scroll.custom_minimum_size = Vector2(0, 380)
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_content.add_child(_scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 6)
+	_scroll.add_child(list)
+	for group in Upgrades.ATTR_GROUPS:
+		list.add_child(UIKit.label(group, 14, a, true))
+		var grid := GridContainer.new()
+		grid.columns = 3
+		grid.add_theme_constant_override("h_separation", 8)
+		grid.add_theme_constant_override("v_separation", 8)
+		list.add_child(grid)
+		for id in Upgrades.ATTRS:
+			if Upgrades.ATTRS[id]["group"] == group:
+				grid.add_child(_attr_card(id, a))
+
+func _attr_card(id: String, a: Color) -> Control:
+	var level: int = profile.attr_level(id)
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(286, 0)
+	card.add_theme_stylebox_override("panel", UIKit.slab(UIKit.CARD, a if level > 0 else Color(1, 1, 1, 0.15), 4, 8))
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 3)
+	card.add_child(v)
+	var line := _row(v, 8)
+	var name := UIKit.label(str(Upgrades.ATTRS[id]["name"]).to_upper(), 14, UIKit.TEXT, true)
+	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_child(name)
+	line.add_child(UIKit.pips(level, Upgrades.ATTR_LEVEL_MAX, a))
+	var plus := _button(line, "+", _spend.bind(id), profile.points <= 0 or level >= Upgrades.ATTR_LEVEL_MAX or profile.attr_total() >= Upgrades.ATTR_TOTAL_MAX)
+	plus.custom_minimum_size = Vector2(34, 30)
+	var desc := UIKit.label(Upgrades.attr_text(id) + " per level", 11, UIKit.DIM)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.custom_minimum_size = Vector2(250, 0)
+	v.add_child(desc)
+	return card
 
 func _fill_map() -> void:
 	_row().add_child(UIKit.label("MAP %d" % selected_seed, 44, UIKit.AMBER, true))
@@ -699,7 +792,7 @@ func _fill_raid() -> void:
 	tiles.add_child(UIKit.tile("map (change it at the map)", str(selected_seed), a))
 	tiles.add_child(UIKit.tile("starting weapon", str(WeaponData.DATA[profile.equipped]["name"]).to_upper(), a))
 	tiles.add_child(UIKit.tile("reward", "x%.2f" % mult, UIKit.GOOD if mult > 1.0 else (UIKit.BAD if mult < 1.0 else UIKit.TEXT)))
-	_label("RISK DIAL  -  harder options pay more loot and more attribute points; easier ones pay less", 12, UIKit.DIM)
+	_label("RISK DIAL  -  harder options pay more loot; easier ones pay less", 12, UIKit.DIM)
 	for id in Difficulty.OPTIONS:
 		var opt: Dictionary = Difficulty.OPTIONS[id]
 		var line := _row(null, 12)

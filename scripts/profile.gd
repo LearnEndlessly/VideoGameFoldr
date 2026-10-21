@@ -64,7 +64,13 @@ func load_from_disk() -> void:
 	if typeof(a) == TYPE_DICTIONARY:
 		for id in a:
 			if Upgrades.ATTRS.has(str(id)):
-				attrs[str(id)] = clampi(int(a[id]), 0, int(Upgrades.ATTRS[str(id)]["max"]))
+				attrs[str(id)] = clampi(int(a[id]), 0, Upgrades.ATTR_LEVEL_MAX)
+		var over := attr_total() - Upgrades.ATTR_TOTAL_MAX  # a hand-edited save cannot beat the cap
+		for id in attrs.keys():
+			var cut := mini(over, int(attrs[id]))
+			if cut > 0:
+				attrs[id] = int(attrs[id]) - cut
+				over -= cut
 	points = maxi(int(data.get("points", 0)), 0)
 	var dd = data.get("difficulty")
 	if typeof(dd) == TYPE_DICTIONARY:
@@ -121,12 +127,16 @@ func set_wear(att: String, left: int) -> void:
 	else:
 		wear[att] = maxi(left, 0)
 
-# Restores an attachment to full durability for Attachments.REPAIR_SCRAP scrap, and only scrap. False (nothing
+# Scrap a repair costs: Attachments.REPAIR_SCRAP, less one per level of Tinkerer, never under 1.
+func repair_cost() -> int:
+	return maxi(Attachments.REPAIR_SCRAP - int(bonus("repair_cost")), 1)
+
+# Restores an attachment to full durability for repair_cost() scrap, and only scrap. False (nothing
 # changes) if it is not worn or the stash is short.
 func repair(att: String) -> bool:
-	if not Attachments.DATA.has(att) or not wear.has(att) or owned("scrap") < Attachments.REPAIR_SCRAP:
+	if not Attachments.DATA.has(att) or not wear.has(att) or owned("scrap") < repair_cost():
 		return false
-	totals["scrap"] = owned("scrap") - Attachments.REPAIR_SCRAP
+	totals["scrap"] = owned("scrap") - repair_cost()
 	if totals["scrap"] <= 0:
 		totals.erase("scrap")
 	wear.erase(att)
@@ -156,13 +166,9 @@ func record_raid(extracted: bool, kills: int, shots: int, hits: int, level: int)
 func accuracy() -> int:
 	return -1 if stats["shots"] <= 0 else int(round(100.0 * stats["hits"] / stats["shots"]))
 
-# A successful extract: bank the points it earned (see data/upgrades.gd, scaled by the raid's reward
-# multiplier) and the lifetime stats. Returns the points gained.
-func record_extract(kills: int, reward_mult := 1.0) -> int:
-	var gained := mini(Difficulty.scale(Upgrades.POINTS_PER_EXTRACT + kills / Upgrades.KILLS_PER_POINT, reward_mult), Upgrades.POINTS_PER_RAID_MAX)
-	points += gained
+# A successful extract: count it on the scoreboard. (Attribute points come from clearing rounds, see grant_point.)
+func record_extract() -> void:
 	stats["extracts"] += 1
-	return gained
 
 # --- weapons ---
 
@@ -191,25 +197,47 @@ func reward_mult() -> float:
 func attr_level(id: String) -> int:
 	return int(attrs.get(id, 0))
 
-# Spends one point on an attribute. False if there is no point to spend or it is at its maximum.
+# Points already spent, across every attribute.
+func attr_total() -> int:
+	var t := 0
+	for id in attrs:
+		t += int(attrs[id])
+	return t
+
+# A cleared round earns a point, unless the points held and spent already reach Upgrades.ATTR_TOTAL_MAX. True if one was added.
+func grant_point() -> bool:
+	if points + attr_total() >= Upgrades.ATTR_TOTAL_MAX:
+		return false
+	points += 1
+	return true
+
+# Spends one point on an attribute. False if there is no point to spend, the attribute is at ATTR_LEVEL_MAX or the
+# total spent is at ATTR_TOTAL_MAX.
 func spend_point(id: String) -> bool:
-	if not Upgrades.ATTRS.has(id) or points <= 0 or attr_level(id) >= int(Upgrades.ATTRS[id]["max"]):
+	if not Upgrades.ATTRS.has(id) or points <= 0 or attr_level(id) >= Upgrades.ATTR_LEVEL_MAX or attr_total() >= Upgrades.ATTR_TOTAL_MAX:
 		return false
 	points -= 1
 	attrs[id] = attr_level(id) + 1
 	return true
 
+# What the attributes add to `stat` (data/upgrades.gd STATS): every attribute's level times what one level adds.
+func bonus(stat: String) -> float:
+	var t := 0.0
+	for id in attrs:
+		t += float(Upgrades.ATTRS[id]["stats"].get(stat, 0.0)) * int(attrs[id])
+	return t
+
 func speed_mult() -> float:
-	return 1.0 + float(Upgrades.ATTRS["speed"]["per_level"]) * attr_level("speed")
+	return 1.0 + bonus("speed")
 
 func max_health(base: int) -> int:
-	return base + int(Upgrades.ATTRS["constitution"]["hp"]) * attr_level("constitution")
+	return base + int(bonus("hp"))
 
 func armor() -> float:
-	return float(Upgrades.ATTRS["constitution"]["armor"]) * attr_level("constitution")
+	return bonus("armor")
 
 func reload_mult() -> float:
-	return 1.0 - float(Upgrades.ATTRS["handling"]["per_level"]) * attr_level("handling")
+	return 1.0 - bonus("reload")
 
 # Writes to a temp file first so a crash mid-save cannot corrupt the existing profile.
 func save() -> bool:

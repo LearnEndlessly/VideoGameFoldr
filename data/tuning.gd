@@ -48,6 +48,17 @@ const MAP_ASPECT_MIN := 0.5
 const MAP_ASPECT_MAX := 2.0
 const MAP_MIN_SIDE := 44.0
 const MAP_MAX_SIDE := 100.0
+# Map types, picked per map by weight from a stream of their own (a seed's "open" maps are the same as before):
+#   open    the shape above
+#   narrow  a lane "width" wide and "length" long (m). The player starts "start_inset" m from one end and the safe
+#           extract is at the far end. Every "gate_every" m a wall crosses the lane with a "gap" m opening, on
+#           alternating sides, so the way through is a line that weaves from one end to the other.
+const MAP_TYPES := {
+	"open": {"weight": 3},
+	"narrow": {"weight": 1, "width": [28.0, 36.0], "length": [96.0, 100.0], "start_inset": 5.0, "gate_first": 18.0, "gate_every": 24.0, "gap": 6.0},
+}
+# Towers: platforms you climb a ladder to for a view over the cover.
+const TOWER_COUNT := 2
 # Minimum clear walking space (m) kept between placed objects and between objects and the outer wall.
 # Cover per map varies: each map tries a random number of cover boxes between these (cover that does not fit
 # is skipped), and each cover type's chance is scaled by a random factor in COVER_MIX_RANGE, so some maps
@@ -154,6 +165,15 @@ const XP_MAGNET_RADIUS := 4.0
 const XP_MAGNET_SPEED := 9.0
 # Weapon attachments (data/attachments.gd) are super rare: this chance per kill.
 const ATTACHMENT_DROP_CHANCE := 0.02
+
+# Kill combo (scripts/raid.gd): a kill starts or extends a combo. It lasts COMBO_WINDOW seconds after the last kill, and
+# every kill after the first shortens that by COMBO_WINDOW_SHRINK (never under COMBO_WINDOW_MIN). When it runs out
+# the score it banked (COMBO_KILL_SCORE per point of enemy difficulty) is paid times 1 + COMBO_MULT_STEP per kill after the first.
+const COMBO_WINDOW := 4.0
+const COMBO_WINDOW_SHRINK := 0.2
+const COMBO_WINDOW_MIN := 1.2
+const COMBO_MULT_STEP := 0.25
+const COMBO_KILL_SCORE := 100
 # True: a real launch of the game starts with an empty profile (no stash, points, attributes or difficulty)
 # until saving is built; a raid or the base reloading within the session keeps what was earned.
 const RESET_ON_LAUNCH := true

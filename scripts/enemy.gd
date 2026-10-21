@@ -4,6 +4,8 @@ const Sfx = preload("res://scripts/sfx.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Model = preload("res://scripts/model.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
+const Enemies = preload("res://data/enemies.gd")
+const Projectile = preload("res://scripts/projectile.gd")
 
 const REACH := 1.8
 const LOSE := 30.0          # an alert enemy loses the player beyond this range
@@ -26,6 +28,9 @@ var converging := false          # the threat clock sent this enemy toward conve
 var converge_target := Vector3.ZERO
 
 var _attack_cd := 0.0
+var _shot_cd := 2.0  # seconds until a ranged enemy may fire
+var _hover_y := 0.0  # the height a flyer holds
+var _ping := 0.0  # seconds until a scout next raises the alarm
 var _lost_timer := 0.0
 var _repick := 0.0
 var _step_dist := 0.0  # metres walked since the last footstep sound
@@ -71,6 +76,13 @@ func _ready() -> void:
 	_mat.emission = ALERT_COLOR
 	mesh.material_override = _mat
 	add_child(mesh)
+	if stats.get("zones", true):
+		_build_zones(size)
+	if stats.get("flying", false):
+		_build_wings(size)
+		collision_mask = 0  # it flies over walls and cover
+		_hover_y = position.y + float(stats["hover"])
+		position.y = _hover_y
 	var model := Model.load_scene(stats.get("model", ""))
 	if model != null:  # an art asset replaces the placeholder capsule (kept, hidden)
 		mesh.visible = false
@@ -142,7 +154,7 @@ func _ray_reach(local_dir: Vector3) -> float:
 	return reach if hit.is_empty() else from.distance_to(hit["position"])
 
 func _refresh_cone() -> void:
-	_cone.visible = not alert
+	_cone.visible = not alert and not stats.get("flying", false)
 	_cone_mat.albedo_color = Color(1, 1, 1, 0.12).lerp(Color(1, 0.25, 0.1, 0.4), suspicion)
 
 func _bar_quad(quad_size: Vector2, color: Color) -> MeshInstance3D:
@@ -214,7 +226,7 @@ func alert_pack(cause: String = "sight") -> void:
 	get_tree().call_group("pack_%d" % group_id, "set_alert", true)
 
 func _update_label() -> void:
-	_label.text = ("%s%s %s" % ["! " if alert else "", stats["modifier"], stats["type"]]).replace("  ", " ")
+	_label.text = ("%s%s %s" % ["! " if alert else "", stats["modifier"], str(stats["type"]).replace("_", " ")]).replace("  ", " ")
 
 # Returns true if this hit killed the enemy.
 func take_damage(amount: int) -> bool:
@@ -248,7 +260,8 @@ func _physics_process(delta: float) -> void:
 
 	if not alert:
 		_update_suspicion(player, dist, delta)
-		_update_cone_shape()
+		if not stats.get("flying", false):
+			_update_cone_shape()
 
 	if alert:
 		if dist > LOSE:
@@ -257,7 +270,10 @@ func _physics_process(delta: float) -> void:
 				set_alert(false)
 		else:
 			_lost_timer = 0.0
-			if dist > REACH:
+			_try_shoot(delta, player, dist)
+			if stats.get("flying", false):
+				_scout_hover(delta, player, to_player, dist)
+			elif dist > REACH or absf(player.global_position.y - global_position.y) > 2.5:  # a player up a tower cannot be reached
 				_walk(to_player, float(stats["speed"]))
 			else:
 				_attack_cd -= delta
@@ -284,7 +300,10 @@ func _physics_process(delta: float) -> void:
 		else:
 			_walk(to_target, float(stats["speed"]) * PATROL_SPEED)
 
-	velocity.y = velocity.y - 20.0 * delta if not is_on_floor() else 0.0
+	if stats.get("flying", false):
+		velocity.y = clampf((_hover_y - global_position.y) * 3.0, -4.0, 4.0)  # holds its height
+	else:
+		velocity.y = velocity.y - 20.0 * delta if not is_on_floor() else 0.0
 	move_and_slide()
 	_turn(to_player if alert else Vector3(velocity.x, 0, velocity.z), delta)
 	_footsteps(delta, player)
@@ -306,7 +325,7 @@ func _sees(player, dist: float) -> bool:
 	var forward := -global_transform.basis.z
 	forward.y = 0.0
 	var cos_half := cos(deg_to_rad(Tuning.ENEMY_FOV_DEGREES / 2.0))
-	var in_cone := dist < Tuning.ENEMY_NEAR_SENSE or forward.normalized().dot(to_player.normalized()) >= cos_half
+	var in_cone := dist < Tuning.ENEMY_NEAR_SENSE or bool(stats.get("scout", false)) or forward.normalized().dot(to_player.normalized()) >= cos_half
 	return in_cone and _has_line_of_sight(player)
 
 # Seen: the meter fills over detect_seconds (Tuning.ENEMY_DETECT_SECONDS unless the difficulty changes it) (twice as fast when only heard); otherwise it drains.
@@ -315,10 +334,10 @@ func _update_suspicion(player, dist: float, delta: float) -> void:
 	var gain := -1.0 / Tuning.ENEMY_DETECT_DECAY_SECONDS
 	var cause := "sight"
 	if player != null and _sees(player, dist):
-		gain = 1.0 / detect_seconds
+		gain = (1.0 - (player.stealth if "stealth" in player else 0.0)) / _detect()  # Ghost
 		last_seen = player.global_position
 	elif player != null and _hears(player, dist):
-		gain = 2.0 / detect_seconds
+		gain = 2.0 * (1.0 - (player.stealth if "stealth" in player else 0.0)) / _detect()
 		cause = "noise"
 		last_seen = player.global_position
 	suspicion = clampf(suspicion + gain * delta, 0.0, 1.0)
@@ -377,3 +396,124 @@ func _walk(dir: Vector3, speed: float) -> void:
 	var d := dir.normalized() * speed
 	velocity.x = d.x
 	velocity.z = d.z
+
+# Seconds in view before this enemy raises the alarm: a scout needs only a fraction of the usual time.
+func _detect() -> float:
+	return detect_seconds * (Enemies.SCOUT_DETECT_MULT if stats.get("scout", false) else 1.0)
+
+# --- hit zones ---
+
+# Where a shot at world `point` from world `from` landed: "head" (the top of the body, from any side), or by where the
+# shooter stands: "back", "front" (the armor) or "side". "" for an enemy with no zones (the scout).
+func zone_at(point: Vector3, from: Vector3) -> String:
+	if not Enemies.zones_enabled or not stats.get("zones", true):
+		return ""
+	var size: float = stats["size"]
+	if to_local(point).y > Enemies.HEAD_HEIGHT * 2.0 * size:
+		return "head"
+	var d := to_local(from)
+	d.y = 0.0
+	if d.length() < 0.01:
+		return "side"
+	d = d.normalized()
+	if d.z > 0.3:  # the enemy looks along -Z, so +Z is its back
+		return "back"
+	return "front" if d.z < -0.3 else "side"
+
+# The damage multiplier of a zone ("" = 1): data/enemies.gd ZONE_MULT, changed by the type's own "zone_mult".
+func zone_mult(zone: String) -> float:
+	if zone == "":
+		return 1.0
+	return float(stats.get("zone_mult", {}).get(zone, Enemies.ZONE_MULT[zone]))
+
+# Paints the zones on the body: armor plates (steel blue) on the front, weak points (orange, glowing) on the head
+# and the back. The capsule collider does not change; zone_at decides where a shot counts.
+func _build_zones(size: float) -> void:
+	var r := 0.5 * size
+	var front := _zone_box(Vector3(1.7 * r, 1.1 * size, 0.14 * size), Vector3(0, 0.95 * size, -0.95 * r), Enemies.STRONG_COLOR, false)
+	front.name = "ArmorFront"
+	var back := _zone_box(Vector3(1.0 * r, 0.8 * size, 0.1 * size), Vector3(0, size, 0.97 * r), Enemies.WEAK_COLOR, true)
+	back.name = "WeakBack"
+	var head := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.3 * size
+	sm.height = 0.6 * size
+	head.mesh = sm
+	head.position.y = 1.78 * size
+	head.material_override = _zone_material(Enemies.WEAK_COLOR, true)
+	head.name = "WeakHead"
+	add_child(head)
+
+func _zone_box(box_size: Vector3, pos: Vector3, color: Color, glow: bool) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = box_size
+	m.mesh = bm
+	m.position = pos
+	m.material_override = _zone_material(color, glow)
+	add_child(m)
+	return m
+
+func _zone_material(color: Color, glow: bool) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	if glow:
+		mat.emission_enabled = true
+		mat.emission = color
+		mat.emission_energy_multiplier = 1.5
+	else:
+		mat.metallic = 0.6
+		mat.roughness = 0.35
+	return mat
+
+# --- the scout ---
+
+# Two flat wings, so a scout reads as a small flyer.
+func _build_wings(size: float) -> void:
+	for s in [-1.0, 1.0]:
+		var w := _zone_box(Vector3(1.4 * size, 0.04, 0.5 * size), Vector3(s * 0.9 * size, size, 0), Enemies.TYPES["scout"]["color"].darkened(0.3), false)
+		w.name = "Wing"
+
+# Alerted scout: stays 6-10 m from the player, in the air, and every SCOUT_PING_SECONDS raises the alarm.
+func _scout_hover(delta: float, player, to_player: Vector3, dist: float) -> void:
+	if dist > 10.0:
+		_walk(to_player, float(stats["speed"]))
+	elif dist < 6.0:
+		_walk(-to_player, float(stats["speed"]) * 0.6)
+	_ping -= delta
+	if _ping <= 0.0:
+		_ping = Enemies.SCOUT_PING_SECONDS
+		raise_alarm(player.global_position)
+
+# Every enemy within SCOUT_ALERT_RADIUS of this one learns where the player is: those near the player turn alert, the
+# rest head for that spot.
+func raise_alarm(player_pos: Vector3) -> void:
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e == self or e.is_queued_for_deletion() or e.global_position.distance_to(global_position) > Enemies.SCOUT_ALERT_RADIUS:
+			continue
+		e.last_seen = player_pos
+		if Vector2(e.global_position.x - player_pos.x, e.global_position.z - player_pos.z).length() <= LOSE:
+			e.alert_pack("scout")
+		else:
+			e.set_converge(player_pos)
+
+# --- ranged attack (the super brute) ---
+
+# Fires a slow projectile straight at where the player is now, when one is in range, in the open, and the gun is ready.
+func _try_shoot(delta: float, player, dist: float) -> void:
+	var r: Dictionary = stats.get("ranged", {})
+	if r.is_empty():
+		return
+	_shot_cd -= delta
+	if _shot_cd > 0.0 or dist < float(r["min"]) or dist > float(r["range"]) or not _has_line_of_sight(player):
+		return
+	_shot_cd = float(r["cooldown"])
+	var origin := global_position + Vector3(0, 1.5 * float(stats["size"]), 0)
+	var p := Projectile.new()
+	p.direction = (player.global_position + Vector3(0, 1.2, 0) - origin).normalized()
+	p.speed = float(r["speed"])
+	p.damage = int(round(float(stats["damage"]) * float(r["damage_mult"])))
+	p.radius = float(r["radius"])
+	p.position = origin
+	get_parent().add_child(p)
+	Sfx.play("enemy_strike", global_position)

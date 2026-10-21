@@ -26,6 +26,13 @@ var max_health := MAX_HEALTH  # raised by the Constitution attribute (apply_prof
 var armor := 0.0  # fraction of every hit absorbed
 var speed_mult := 1.0
 var gravity_mult := 1.0  # the Moon boots upgrade lowers it
+var sprint_mult := 1.0  # attributes (apply_profile): extra sprint speed, jump speed, how slowly enemies spot you,
+var jump_mult := 1.0  # the chance to shrug off a hit, the extra armor below 30% health and the medkit boost
+var stealth := 0.0
+var dodge := 0.0
+var last_stand := 0.0
+var heal_mult := 1.0
+var ladder  # the ladder (scripts/ladder.gd) the player stands at, or null
 var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
 var sprinting := false  # moving with Shift held: loud, enemies hear it through walls
@@ -78,7 +85,7 @@ func use_slot(i: int) -> void:
 	var id: String = s["id"]
 	if _try_craft(id):
 		return
-	var heal: int = Loot.ITEMS[id].get("heal", 0)
+	var heal := int(round(int(Loot.ITEMS[id].get("heal", 0)) * heal_mult))
 	if heal > 0 and health < max_health:
 		health = mini(health + heal, max_health)
 		inventory.take_one(i)
@@ -96,7 +103,12 @@ func _try_craft(id: String) -> bool:
 	return false
 
 func take_damage(amount: int) -> void:
-	health -= maxi(1, int(round(amount * (1.0 - armor))))
+	if dodge > 0.0 and randf() < dodge:
+		return  # Evasion
+	var absorbed := armor
+	if last_stand > 0.0 and health < max_health * 0.3:  # Last stand
+		absorbed = 1.0 - (1.0 - armor) * (1.0 - last_stand)
+	health -= maxi(1, int(round(amount * (1.0 - absorbed))))
 	Sfx.play("hurt")
 	if health <= 0:
 		died.emit()
@@ -160,6 +172,12 @@ func apply_profile(profile) -> void:
 	health = max_health
 	armor = profile.armor()
 	speed_mult = profile.speed_mult()
+	sprint_mult = 1.0 + profile.bonus("sprint_speed")
+	jump_mult = 1.0 + profile.bonus("jump_height")
+	stealth = clampf(profile.bonus("stealth"), 0.0, 0.9)
+	dodge = profile.bonus("dodge")
+	last_stand = profile.bonus("last_stand")
+	heal_mult = 1.0 + profile.bonus("heal_mult")
 	loadout = [profile.equipped]
 	select_weapon(profile.equipped)
 
@@ -170,13 +188,21 @@ func _physics_process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_A): dir -= transform.basis.x
 	if Input.is_physical_key_pressed(KEY_D): dir += transform.basis.x
 	var run := Input.is_physical_key_pressed(KEY_SHIFT)
-	var speed: float = (Tuning.PLAYER_SPRINT_SPEED if run else Tuning.PLAYER_WALK_SPEED) * speed_mult
+	var speed: float = (Tuning.PLAYER_SPRINT_SPEED * sprint_mult if run else Tuning.PLAYER_WALK_SPEED) * speed_mult
 	dir = dir.normalized() * speed
 	sprinting = run and dir.length() > 0.1  # enemies can hear this (see enemy.gd)
 	velocity.x = dir.x
 	velocity.z = dir.z
-	if is_on_floor():
-		if Input.is_physical_key_pressed(KEY_SPACE): velocity.y = Tuning.PLAYER_JUMP_SPEED
+	var up := Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_SPACE)
+	var on_ladder: bool = ladder != null and global_position.y < ladder.top_y - 0.02
+	if on_ladder and (-transform.basis.z).dot(ladder.facing) > 0.5 and up:
+		velocity = Vector3(0, ladder.CLIMB_SPEED, 0)  # climbing: looking at the tower, holding W; no drifting off sideways
+	elif on_ladder and Input.is_physical_key_pressed(KEY_S):
+		velocity = Vector3(0, -ladder.CLIMB_SPEED, 0)
+	elif on_ladder and not is_on_floor():
+		velocity = Vector3.ZERO  # let go and you stay where you are
+	elif is_on_floor():
+		if Input.is_physical_key_pressed(KEY_SPACE): velocity.y = Tuning.PLAYER_JUMP_SPEED * jump_mult
 	else:
 		velocity.y -= 20.0 * gravity_mult * delta
 	move_and_slide()
@@ -265,7 +291,8 @@ func _update_zoom(delta: float) -> void:
 	zooming = raid != null and not inventory_open and (zoom_input_test or (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 		and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)))
 	var zoom_mult: float = raid.zoom_mult(weapon_id) if raid != null else 1.0  # a Scope attachment
-	var target: float = float(weapon.get("zoom_fov", BASE_FOV)) * zoom_mult if zooming else BASE_FOV
+	var fov_mult: float = raid.fov_mult(weapon_id) if raid != null else 1.0  # a Scope attachment and Eagle eye
+	var target: float = float(weapon.get("zoom_fov", BASE_FOV)) * fov_mult if zooming else BASE_FOV
 	_cam.fov = move_toward(_cam.fov, target, ZOOM_FOV_SPEED * delta)
 	scoped = zooming and (bool(weapon.get("scope", false)) or zoom_mult < 1.0) and _cam.fov < BASE_FOV * 0.5
 	if _viewmodel != null:
