@@ -12,6 +12,7 @@ const Enemies = preload("res://data/enemies.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Scenery = preload("res://data/scenery.gd")
 const LootZones = preload("res://data/loot_zones.gd")
+const Buildings = preload("res://data/buildings.gd")
 const Rng = preload("res://data/rng.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
@@ -73,6 +74,7 @@ var half_d := 30.0
 var towers: Array = []  # {"pos", "ladder", "top"} of each watch tower
 var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
 var shelters: Array = []  # Vector3 centres of the safe nooks
+var buildings: Array = []  # walkable buildings: {"id", "pos", "rect": Rect2 on the XZ plane}
 var blocks: Array = []  # [size, centre, colour] of every box added, for the base's map table
 var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
@@ -171,6 +173,7 @@ func _build_map() -> void:
 		_garrison(_spawners.back())
 	_place_shelters()
 	_place_towers()
+	_place_buildings()  # before the cover, which fills what is left; drawn from its own RNG stream
 	var mix := {}  # this map's own cover mix: each type's weight scaled by a random factor
 	for k in Scenery.COVER_TYPES:
 		mix[k] = maxi(1, int(round(float(Scenery.COVER_TYPES[k]["weight"]) * 10.0 * rng.randf_range(Tuning.COVER_MIX_RANGE[0], Tuning.COVER_MIX_RANGE[1]))))
@@ -741,7 +744,7 @@ func _map_info() -> Dictionary:
 		elif c.is_in_group("lootable"):
 			crates.append({"zone": c.zone_id, "pos": c.position})
 	return {"type": map_type, "w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
-		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
+		"zones": zones, "buildings": buildings.map(func(b): return {"id": b["id"], "pos": b["pos"]}), "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
 
 # An enemy base: a small footprint reserved like a group, far from the start and (when the map has room)
 # SPAWNER_MIN_SEPARATION m from every other base. See scripts/spawner.gd.
@@ -848,6 +851,60 @@ func _place_towers() -> void:
 		if p != null:
 			_add_tower(p, rng.randi_range(0, 3))
 	rng = map_rng
+
+# Walkable buildings (data/buildings.gd): Buildings.COUNT of them, each a scene from scenes/buildings/. Drawn from a stream of
+# the map seed's own, like the towers, and a building with no clear spot is skipped. They go in before the cover so there is room.
+func _place_buildings() -> void:
+	var brng := RandomNumberGenerator.new()
+	brng.seed = ("buildings:%d" % rng.seed).hash()
+	var map_rng := rng
+	rng = brng
+	var ids: Array = Buildings.DATA.keys()
+	var total := 0
+	for id in ids:
+		total += int(Buildings.DATA[id]["weight"])
+	for i in rng.randi_range(Buildings.COUNT[0], Buildings.COUNT[1]):
+		var roll := rng.randi_range(1, total)
+		for id in ids:
+			roll -= int(Buildings.DATA[id]["weight"])
+			if roll <= 0:
+				_add_building(id, Buildings.DATA[id])
+				break
+	rng = map_rng
+
+# One building at a clear spot, turned a random quarter turn, then turned round if its door (local +z) would face the outer wall.
+# Its CrateSpots markers (tools/build_buildings.gd) give the floor spots; a random few get loot crates.
+func _add_building(id: String, def: Dictionary) -> void:
+	var turn := rng.randi_range(0, 3)
+	var size := Vector2(def["size"][0], def["size"][1])
+	if turn % 2 == 1:
+		size = Vector2(size.y, size.x)
+	var p = _free_spot(size.x / 2.0, size.y / 2.0, 10.0, false)
+	if p == null:
+		return
+	if Vector3(0, 0, 1).rotated(Vector3.UP, turn * PI / 2.0).dot(p) > 0.0:
+		turn = (turn + 2) % 4
+	var node: Node3D = (load(def["scene"]) as PackedScene).instantiate()
+	node.position = p
+	node.rotation.y = turn * PI / 2.0
+	add_child(node)
+	var rect := Rect2(Vector2(p.x - size.x / 2.0, p.z - size.y / 2.0), size)
+	solids.append(rect)
+	buildings.append({"id": id, "pos": p, "rect": rect})
+	var spots: Array = node.get_node("CrateSpots").get_children()
+	for i in range(spots.size() - 1, 0, -1):  # shuffled from the map's stream, not Array.shuffle's global one
+		var j := rng.randi_range(0, i)
+		var tmp = spots[i]
+		spots[i] = spots[j]
+		spots[j] = tmp
+	var crates: Array = def["crates"]
+	for m in spots.slice(0, mini(rng.randi_range(crates[0], crates[1]), spots.size())):
+		var c := Crate.new()
+		c.seed_value = rng.randi()
+		c.zone_id = Buildings.CRATE_ZONE_ID
+		c.color = Buildings.CRATE_COLOR
+		c.position = node.transform * (m.position + Vector3(0, 0.5, 0))
+		add_child(c)
 
 # A deck on four legs with a rail on three sides and a ladder up the fourth (`ladder_side`, see _side_normal).
 func _add_tower(pos: Vector3, ladder_side: int) -> void:

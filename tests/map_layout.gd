@@ -79,7 +79,9 @@ func _check_structures(s: int, main) -> void:
 				found = true
 				per_area[st["id"]] = per_area.get(st["id"], 0) + 1
 		if not found:
-			_fail(s, "a crate at %s is outside every loot area" % [c.position])
+			found = main.buildings.any(func(b): return b["rect"].has_point(at))  # a building's own crates
+		if not found:
+			_fail(s, "a crate at %s is outside every loot area and building" % [c.position])
 	for st in main.structures:
 		if per_area.get(st["id"], 0) < 2:
 			_fail(s, "%s has only %d crate(s)" % [st["id"], per_area.get(st["id"], 0)])

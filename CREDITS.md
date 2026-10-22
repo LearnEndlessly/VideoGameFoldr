@@ -8,6 +8,7 @@ Every third-party asset in this project is listed here with its source and licen
 | `assets/props/kenney_blaster_kit/*.glb` (crates, targets) and its `Textures/` | Blaster Kit 2.1, Kenney | CC0 1.0 | https://kenney.nl/assets/blaster-kit |
 | `assets/props/kenney_prototype_kit/*.glb` (shapes, crates, pipes, props) and its `Textures/` | Prototype Kit, Kenney | CC0 1.0 | https://kenney.nl/assets/prototype-kit |
 | `assets/buildings/kenney_prototype_kit/*.glb` (walls, floors, doors, stairs, columns) and its `Textures/` | Prototype Kit, Kenney | CC0 1.0 | https://kenney.nl/assets/prototype-kit |
+| `assets/buildings/kenney_modular_buildings/*.glb` (building cells, doors, windows, roofs) and its `Textures/` | Modular Buildings, Kenney | CC0 1.0 | https://kenney.nl/assets/modular-buildings |
 
 Notes:
 - CC0 needs no attribution; Kenney asks for credit ("Kenney" or www.kenney.nl) but does not require it. It is listed here anyway so the origin is traceable.
