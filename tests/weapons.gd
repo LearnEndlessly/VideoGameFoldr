@@ -8,7 +8,6 @@ const Profile = preload("res://scripts/profile.gd")
 const Enemy = preload("res://scripts/enemy.gd")
 const Enemies = preload("res://data/enemies.gd")
 const WeaponData = preload("res://data/weapons.gd")
-const LootZones = preload("res://data/loot_zones.gd")
 const Hub = preload("res://scripts/hub.gd")
 const PATH := "user://test_weapons.json"
 
@@ -55,7 +54,7 @@ func _key(code: int) -> InputEventKey:
 
 func _run() -> void:
 	DirAccess.remove_absolute(PATH)
-	_check(LootZones.DATA["armory"]["name"] == "AMMO DEPOT" and Hub.STATIONS["armory"]["name"] == "AMMO DEPOT", "the armory should be called the Ammo Depot")
+	_check(Hub.STATIONS["armory"]["name"] == "AMMO DEPOT", "the armory should be called the Ammo Depot")
 	var sniper: Dictionary = WeaponData.DATA["sniper"]
 	_check(bool(sniper["scope"]) and sniper["damage"] >= 100 and sniper["clip"] <= 5, "the sniper should be a scoped, hard-hitting, small-clip rifle")
 	for id in WeaponData.DATA:

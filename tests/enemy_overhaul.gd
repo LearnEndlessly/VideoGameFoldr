@@ -165,7 +165,8 @@ func _run() -> void:
 	s.suspicion = 0.0
 	grunt_peer._update_suspicion(player, 5.0, 0.1)
 	s._update_suspicion(player, 5.0, 0.1)
-	_check(is_equal_approx(grunt_peer._detect() / s._detect(), 4.0) and s.suspicion > grunt_peer.suspicion, "a scout needs a quarter of the time to notice the player (%s vs %s s)" % [s._detect(), grunt_peer._detect()])
+	_check(s._detect() < grunt_peer._detect() and s.suspicion > grunt_peer.suspicion, "a scout needs less time to notice the player (%s vs %s s)" % [s._detect(), grunt_peer._detect()])
+	_check(s._detect() >= Tuning.ENEMY_MIN_GAZE_SECONDS and is_equal_approx(s._detect(), Tuning.ENEMY_MIN_GAZE_SECONDS), "but never under the minimum gaze of %s s" % Tuning.ENEMY_MIN_GAZE_SECONDS)
 	player.sprinting = false
 	# The alarm: a grunt near the player turns alert, a far one heads for the spot.
 	var near_g = _enemy(main, "grunt", FAR + Vector3(5, 0, -10), 9)

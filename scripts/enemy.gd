@@ -33,6 +33,7 @@ var _shot_cd := 2.0  # seconds until a ranged enemy may fire
 var _volley := 0  # which of the ranged patterns fires next
 var _hover_y := 0.0  # the height a flyer holds
 var _ping := 0.0  # seconds until a scout next raises the alarm
+var _whir := 0.0  # seconds until a scout's next rotor sound
 var _lost_timer := 0.0
 var _repick := 0.0
 var _step_dist := 0.0  # metres walked since the last footstep sound
@@ -330,7 +331,8 @@ func _sees(player, dist: float) -> bool:
 	var in_cone := dist < Tuning.ENEMY_NEAR_SENSE or bool(stats.get("scout", false)) or forward.normalized().dot(to_player.normalized()) >= cos_half
 	return in_cone and _has_line_of_sight(player)
 
-# Seen: the meter fills over detect_seconds (Tuning.ENEMY_DETECT_SECONDS unless the difficulty changes it) (twice as fast when only heard); otherwise it drains.
+# Seen or heard: the meter fills over detect_seconds (Tuning.ENEMY_DETECT_SECONDS unless the difficulty changes it; never under
+# ENEMY_MIN_GAZE_SECONDS); otherwise it drains.
 # A full meter alerts the whole group.
 func _update_suspicion(player, dist: float, delta: float) -> void:
 	var gain := -1.0 / Tuning.ENEMY_DETECT_DECAY_SECONDS
@@ -339,7 +341,7 @@ func _update_suspicion(player, dist: float, delta: float) -> void:
 		gain = (1.0 - (player.stealth if "stealth" in player else 0.0)) / _detect()  # Ghost
 		last_seen = player.global_position
 	elif player != null and _hears(player, dist):
-		gain = 2.0 * (1.0 - (player.stealth if "stealth" in player else 0.0)) / _detect()
+		gain = (1.0 - (player.stealth if "stealth" in player else 0.0)) / _detect()
 		cause = "noise"
 		last_seen = player.global_position
 	suspicion = clampf(suspicion + gain * delta, 0.0, 1.0)
@@ -383,6 +385,13 @@ func _first_solid(from: Vector3, to: Vector3) -> Dictionary:
 
 # Heavier enemies take longer strides and sound lower.
 func _footsteps(delta: float, player) -> void:
+	if stats.get("flying", false):  # a scout has no feet: its rotors whir instead
+		_whir -= delta
+		if _whir <= 0.0:
+			_whir = Tuning.SCOUT_WHIR_INTERVAL
+			if player != null and global_position.distance_to(player.global_position) < Tuning.ENEMY_STEP_HEAR_DISTANCE:
+				Sfx.play("scout_whir", global_position)
+		return
 	var speed := Vector2(velocity.x, velocity.z).length()
 	if speed < 0.1 or not is_on_floor():
 		return
@@ -399,9 +408,10 @@ func _walk(dir: Vector3, speed: float) -> void:
 	velocity.x = d.x
 	velocity.z = d.z
 
-# Seconds in view before this enemy raises the alarm: a scout needs only a fraction of the usual time.
+# Seconds in view before this enemy raises the alarm: a scout needs only a fraction of the usual time, but nobody alarms a
+# whole group on less than Tuning.ENEMY_MIN_GAZE_SECONDS.
 func _detect() -> float:
-	return detect_seconds * (Enemies.SCOUT_DETECT_MULT if stats.get("scout", false) else 1.0)
+	return maxf(detect_seconds * (Enemies.SCOUT_DETECT_MULT if stats.get("scout", false) else 1.0), Tuning.ENEMY_MIN_GAZE_SECONDS)
 
 # --- hit zones ---
 

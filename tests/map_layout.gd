@@ -7,7 +7,6 @@ extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
 const Tuning = preload("res://data/tuning.gd")
-const LootZones = preload("res://data/loot_zones.gd")
 const SEEDS := 40
 const CELL := 0.4
 const AGENT_RADIUS := 0.45  # the player capsule is 0.5; the shelter door is 1.8 wide
@@ -52,39 +51,22 @@ func _init() -> void:
 	print("map_layout: %d failure(s) over %d maps (%d wide, %d tall)" % [failures.size(), SEEDS, wide, tall])
 	quit(1 if failures.size() > 0 else 0)
 
-# Every loot building has a second doorway straight across from the first.
-func _check_two_doors(s: int, st: Dictionary) -> void:
-	if not st["door2"].is_equal_approx(st["center"] * 2.0 - st["door"]):
-		_fail(s, "%s's second door is not opposite the first" % st["id"])
-
 func _fail(map_seed: int, message: String) -> void:
 	if failures.size() < 25:
 		failures.append("seed %d: %s" % [map_seed, message])
 
 func _check_structures(s: int, main) -> void:
-	var ids: Array = main.structures.map(func(x): return x["id"])
-	for st in main.structures:
-		_check_two_doors(s, st)
-	ids.sort()
-	var expected: Array = LootZones.DATA.keys()
-	expected.sort()
-	if ids != expected:
-		_fail(s, "loot areas were %s, expected %s" % [ids, expected])
-	var per_area := {}
+	var per_building := {}
 	for c in main.get_children().filter(func(n): return n.is_in_group("lootable")):
 		var at := Vector2(c.position.x, c.position.z)
-		var found := false
-		for st in main.structures:
-			if st["rect"].has_point(at):
-				found = true
-				per_area[st["id"]] = per_area.get(st["id"], 0) + 1
-		if not found:
-			found = main.buildings.any(func(b): return b["rect"].has_point(at))  # a building's own crates
-		if not found:
-			_fail(s, "a crate at %s is outside every loot area and building" % [c.position])
-	for st in main.structures:
-		if per_area.get(st["id"], 0) < 2:
-			_fail(s, "%s has only %d crate(s)" % [st["id"], per_area.get(st["id"], 0)])
+		var idx: int = main.buildings.find_custom(func(b): return b["rect"].has_point(at))
+		if idx < 0:
+			_fail(s, "a crate at %s is outside every building" % [c.position])
+		else:
+			per_building[idx] = per_building.get(idx, 0) + 1
+	for i in main.buildings.size():
+		if per_building.get(i, 0) < 1:
+			_fail(s, "%s has no crates" % main.buildings[i]["id"])
 	if main.shelters.size() != main.SHELTER_COUNT:
 		_fail(s, "expected %d shelters, found %d" % [main.SHELTER_COUNT, main.shelters.size()])
 
@@ -136,12 +118,8 @@ func _check_walkable(s: int, main) -> void:
 	var targets := {}
 	for z in main.extract_zones:
 		targets["extract zone %s" % z["id"]] = z["pos"]
-	for st in main.structures:
-		var inward: Vector3 = (st["center"] - st["door"]).normalized()  # a crate can sit at the centre, so aim just inside the door
-		targets["%s door" % st["id"]] = st["door"]
-		targets["%s just inside" % st["id"]] = st["door"] + inward * 1.0
-		targets["%s second door" % st["id"]] = st["door2"]
-		targets["%s just inside the second door" % st["id"]] = st["door2"] - inward * 1.0
+	for i in main.buildings.size():
+		targets["building %d door" % i] = main.buildings[i]["door"] + main.buildings[i]["out"] * 1.5  # the building is a solid here; its door must be reachable from outside
 	for i in main.shelters.size():
 		targets["shelter %d" % i] = main.shelters[i]
 	var homes := {}

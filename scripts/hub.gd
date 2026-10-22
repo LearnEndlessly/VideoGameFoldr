@@ -311,7 +311,7 @@ func map_info_rows() -> Array:
 	var d := preview_data
 	if d.is_empty():
 		return []
-	return [["SIZE", "%.0fx%.0f" % [d["w"], d["d"]]], ["LOOT ROOMS", str(d["rooms"])], ["ENEMY BASES", str(d["spawners"].size())],
+	return [["SIZE", "%.0fx%.0f" % [d["w"], d["d"]]], ["BUILDINGS", str(d["buildings"])], ["ENEMY BASES", str(d["spawners"].size())],
 		["PATROLS", str(d["groups"].size())], ["COVER", str(d["cover"])]]
 
 # The map's information, recessed into the pit: a plate lying on the far 45 degree wall just below the rim, facing

@@ -121,7 +121,7 @@ func _build(id: String, w: int, d: int, storeys: int, door_col: int, window: Str
 						var jamb := (CELL - DOOR_W) / 2.0
 						_box(p + Vector3(-(DOOR_W + jamb) / 2.0, 0, 0), Vector3(jamb, STOREY, WALL_T))
 						_box(p + Vector3((DOOR_W + jamb) / 2.0, 0, 0), Vector3(jamb, STOREY, WALL_T))
-						_box(Vector3(p.x, y + 2.25, p.z), Vector3(DOOR_W, 0.5, WALL_T))
+						_box(Vector3(p.x, y + 2.375, p.z), Vector3(DOOR_W, 0.25, WALL_T))  # the player is 2.0 m tall
 						_piece("door-brown", "Door", Vector3(p.x - DOOR_W / 2.0 + 0.1, y, p.z - WALL_T / 2.0 - 0.5), 90.0, Vector3(CELL, CELL, CELL))
 					else:
 						_box(p, size)
@@ -141,6 +141,10 @@ func _build(id: String, w: int, d: int, storeys: int, door_col: int, window: Str
 	for k in range(storeys - 1):
 		_stairs(k, holes[k + 1], k % 2 == 0)
 	_crate_spots(w, d, storeys, left + (door_col + 0.5) * CELL, holes)
+	var door := Marker3D.new()  # on the front wall, at the foot of the door: where the map generator and the bots aim
+	door.name = "DoorSpot"
+	door.position = Vector3(left + (door_col + 0.5) * CELL, 0, front)
+	_own(door, bld)
 	return bld
 
 # Candidate floor spots for loot crates (Marker3D at the crate's feet) against the inside walls, 2 m apart, kept clear of the
@@ -172,7 +176,7 @@ func _crate_spots(w: int, d: int, storeys: int, door_x: float, holes: Dictionary
 				m.position = Vector3(p.x, level * STOREY, p.y)
 				_own(m, spots)
 
-# Ten solid steps rising from level k to k + 1 inside `lane`, plus one ramp collider through their middles.
+# Ten solid steps rising from level k to k + 1 inside `lane`, plus one ramp collider whose top runs from the landing to the floor above.
 func _stairs(k: int, lane: Rect2, plus_x: bool) -> void:
 	var base := k * STOREY
 	var dx := 1.0 if plus_x else -1.0
@@ -183,4 +187,5 @@ func _stairs(k: int, lane: Rect2, plus_x: bool) -> void:
 		_piece("roof-flat-center", "Step%d_%d" % [k, i], Vector3(x0 + dx * (i + 0.5) * RUN, base, zc), 0.0, Vector3(RUN, h / 0.10625, LANE))
 	var length := Vector3(10 * RUN, STOREY, 0).length()
 	var angle := atan2(STOREY, 10 * RUN)
-	_box(Vector3(x0 + dx * 5 * RUN, base + STOREY / 2.0 + 0.0, zc), Vector3(length, 0.2, LANE), Vector3(0, 0, angle if plus_x else -angle))
+	var normal := Vector3(-dx * sin(angle), cos(angle), 0)
+	_box(Vector3(x0 + dx * 5 * RUN, base + STOREY / 2.0, zc) - normal * 0.1, Vector3(length, 0.2, LANE), Vector3(0, 0, angle if plus_x else -angle))  # top surface from the landing level to the floor above, flush at both ends

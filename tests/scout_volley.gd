@@ -141,7 +141,8 @@ func _run() -> void:
 	prof.stat_override = {"xp_gain": 0.5}
 	raid.xp = 0
 	raid.add_xp(6)
-	_check(raid.xp == 9, "+50%% XP turns 6 into 9 (got %d)" % raid.xp)
+	var want := 6 + int(6 * (0.5 + Tuning.XP_DROP_BONUS))  # the tree's +50% and the flat XP_DROP_BONUS add
+	_check(raid.xp == want, "+50%% XP turns 6 into %d (got %d)" % [want, raid.xp])
 	prof.stat_override = {"xp_range": 3.0}
 	_check(is_equal_approx(raid.xp_magnet_radius(), Tuning.XP_MAGNET_RADIUS + 3.0), "XP pull range adds to the base radius")
 	var orb := XpOrb.new()

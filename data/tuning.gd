@@ -16,7 +16,7 @@ const ENEMY_GROUP_SIZE_MAX := 2
 # The HUD only says how many are left; finding them is the player's job.
 const SPAWNER_COUNT := 4
 const SPAWNER_HEALTH := 100
-const SPAWNER_INTERVAL := 12.0
+const SPAWNER_INTERVAL := 20.0  # was 12
 const SPAWNER_MAX_ALIVE := 3
 const SPAWNER_MIN_ORIGIN := 25.0
 # Bases keep at least SPAWNER_MIN_SEPARATION m from each other (best effort: a map too small to fit them accepts the last try).
@@ -24,8 +24,8 @@ const SPAWNER_MIN_ORIGIN := 25.0
 # they patrol only SPAWNER_PATROL_RADIUS m from it.
 const SPAWNER_MIN_SEPARATION := 40.0
 const SPAWNER_NARROW_SEPARATION := 20.0  # a narrow lane cannot hold bases 40 m apart and still leave room for the extract zones
-const SPAWNER_GARRISON_MIN := 4
-const SPAWNER_GARRISON_MAX := 6
+const SPAWNER_GARRISON_MIN := 2  # was 4..6
+const SPAWNER_GARRISON_MAX := 4
 const SPAWNER_CLUSTER_MIN := 2.5
 const SPAWNER_CLUSTER_MAX := 5.0
 const SPAWNER_PATROL_RADIUS := 5.0
@@ -106,17 +106,13 @@ const ENEMY_SIGHT_RANGE := 18.0
 const ENEMY_FOV_DEGREES := 100.0
 const ENEMY_NEAR_SENSE := 3.0
 const ENEMY_DETECT_SECONDS := 5.0
+const ENEMY_MIN_GAZE_SECONDS := 3.0  # no enemy raises the alarm on a shorter look than this, whatever its awareness (a scout's, a sprinter's noise)
 const ENEMY_DETECT_DECAY_SECONDS := 3.0
 # While suspicious (meter above 0) an enemy stops patrolling: it faces the spot it last saw or heard
 # the player and creeps toward it at this fraction of its speed, stopping ENEMY_INVESTIGATE_STOP m short.
 const ENEMY_INVESTIGATE_SPEED := 0.3
 const ENEMY_INVESTIGATE_STOP := 6.0
 const SPRINT_NOISE_RANGE := 14.0
-
-# One enemy group is placed GUARD_DISTANCE metres outside the door of this loot area
-# ("" = no guard), so entering that area is a risk, not just a trip. Ids are in data/loot_zones.gd.
-const GUARDED_ZONE := "armory"
-const GUARD_DISTANCE := 8.0
 
 # Extraction. Every map has two zones (placed by their own RNG stream, so they never move anything else):
 #   A "Safe route": far from the start, EXTRACT_HOLD_SECONDS to hold.
@@ -173,6 +169,7 @@ const ENEMY_SCALE_CAP := 1.5
 # Experience: a kill leaves one XP orb per point of the enemy's difficulty (data/enemies.gd xp_value). Orbs drift
 # toward the player within XP_MAGNET_RADIUS m at XP_MAGNET_SPEED m/s.
 # (the skill tree's xp_range adds metres to the radius).
+const XP_DROP_BONUS := 0.2  # every point of XP collected is worth this much more (added to the tree's xp_gain)
 const XP_MAGNET_RADIUS := 4.0
 const XP_MAGNET_SPEED := 9.0
 # Weapon attachments (data/attachments.gd) are super rare: this chance per kill.
@@ -198,6 +195,7 @@ const SFX_VOLUME_DB := -6.0
 const PLAYER_STRIDE := 2.5
 const ENEMY_STRIDE := 1.8
 const ENEMY_STEP_HEAR_DISTANCE := 40.0
+const SCOUT_WHIR_INTERVAL := 0.32  # seconds between a scout's rotor sounds while it is within ENEMY_STEP_HEAR_DISTANCE of the player
 # 3D sound falloff: full volume within this many metres of a sound, then it fades
 # with distance (inverse distance), so nearer enemies are louder. Smaller = steeper.
 const SOUND_UNIT_SIZE := 3.0

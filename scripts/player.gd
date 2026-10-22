@@ -212,7 +212,7 @@ func _physics_process(delta: float) -> void:
 		_step_dist += Vector2(velocity.x, velocity.z).length() * delta
 		if _step_dist >= Tuning.PLAYER_STRIDE:
 			_step_dist = 0.0
-			Sfx.play("step_player")
+			Sfx.play("step_player", null, randf_range(0.88, 1.12))  # a little different each step
 
 	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):

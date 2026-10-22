@@ -1,10 +1,11 @@
 # Walkable buildings dropped on the map (scenes/buildings/, built by tools/build_buildings.gd from the Kenney Modular Buildings kit).
-# Placed before the cover (so there is room for them) from a stream of their own; the cover then fills around them, so a seed
-# differs from before the buildings existed, but tuning these never moves the enemies, loot rooms, shelters or towers.
-# A building that finds no clear spot is skipped, so crowded maps get fewer.
+# Placed right after the narrow-map gates (so there is room for them) from a stream of their own; everything else is placed around them, so a seed
+# differs from before the buildings existed.
+# A draw that finds no clear spot is retried (3 draws per building); a map is guaranteed at least one, since loot only lives here.
 # "size" is the footprint [x, z] in metres with the door on the +z side; "crates" is [min, max] loot crates put on random
 # floor spots (the scene's CrateSpots markers); the crates roll from the default loot pool.
 const COUNT := [2, 4]  # buildings attempted per map
+const NARROW_COUNT := [1, 1]  # a narrow lane has no room for more: groups and bases would spawn inside them
 const CRATE_ZONE_ID := "building"
 const CRATE_COLOR := Color(0.9, 0.7, 0.1)
 const DATA := {

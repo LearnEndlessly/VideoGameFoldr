@@ -71,17 +71,14 @@ func _init() -> void:
 	player._cam.make_current()
 	cam.queue_free()
 
-	for st in main.structures:
-		if st["id"] != "armory":
-			continue
-		var out_dir: Vector3 = (st["door"] - st["center"]).normalized()
-		_stand(player, st["door"], out_dir, 10.0)
+	if not main.buildings.is_empty():
+		var b: Dictionary = main.buildings[0]
+		_stand(player, b["door"], b["out"], 10.0)
 		await _frames(4)
-		await _shot("03_armory_outside")
-		_stand(player, st["center"], out_dir, 3.5)  # inside, looking back at the door
-		player.rotation.y += PI
+		await _shot("03_building_outside")
+		_stand(player, b["door"], -b["out"], 2.5)  # just inside, looking out of the door
 		await _frames(4)
-		await _shot("04_armory_inside")
+		await _shot("04_building_inside")
 	var guard: Array = enemies.filter(func(e): return e.group_id == 0)
 	if not guard.is_empty():
 		var home: Vector3 = guard[0].home

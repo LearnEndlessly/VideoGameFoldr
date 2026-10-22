@@ -7,7 +7,6 @@ extends SceneTree
 const Main = preload("res://scripts/main.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Loot = preload("res://data/loot.gd")
-const LootZones = preload("res://data/loot_zones.gd")
 const WeaponData = preload("res://data/weapons.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Enemy = preload("res://scripts/enemy.gd")
@@ -56,11 +55,6 @@ func _run() -> void:
 	rng.seed = 5
 	for i in 4000:
 		_check(Loot.roll(rng)[0] != "repair_kit", "repair_kit dropped from the default pool")
-		for zone_id in LootZones.DATA:
-			var zone: Dictionary = LootZones.DATA[zone_id]
-			if Loot.roll(rng, zone["pool"], zone["qty_mult"])[0] == "repair_kit":
-				_check(false, "repair_kit dropped from %s" % zone_id)
-				break
 	var grunt_speed: float = Enemies.TYPES["grunt"]["speed"]
 	_check(grunt_speed * Enemies.MODIFIERS["fast"]["speed_mult"] > Tuning.PLAYER_WALK_SPEED, "a fast grunt should outrun a walking player")
 	_check(grunt_speed * Enemies.MODIFIERS["fast"]["speed_mult"] < Tuning.PLAYER_SPRINT_SPEED, "a fast grunt should not outrun a sprinting player")
@@ -121,21 +115,3 @@ func _run() -> void:
 	_check(seer._notices(player, 12.0), "sight: another enemy in the way must not block sight")
 	main.queue_free()
 	await process_frame
-
-	# The armory is guarded: group 0 usually spawns GUARD_DISTANCE outside its door.
-	var guarded := 0
-	var seeds := 30
-	for s in seeds:
-		main = await _new_raid(s)
-		for st in main.structures:
-			if st["id"] != Tuning.GUARDED_ZONE:
-				continue
-			for e in main.get_children().filter(func(c): return "stats" in c and c.group_id == 0):
-				if e.home.distance_to(st["door"]) <= Tuning.GUARD_DISTANCE + 4.0 + 0.1:
-					guarded += 1
-					break
-		main.queue_free()
-		await process_frame
-	print("rebalance: the %s was guarded on %d of %d maps" % [Tuning.GUARDED_ZONE, guarded, seeds])
-	_check(guarded >= seeds * 0.8,   # measured 29 of 30 after the door side is picked by guard room
-"the %s was guarded on only %d of %d maps" % [Tuning.GUARDED_ZONE, guarded, seeds])

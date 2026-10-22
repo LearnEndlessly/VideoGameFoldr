@@ -359,7 +359,7 @@ func xp_needed() -> int:
 
 # Adds experience; each full level earns a pick.
 func add_xp(amount: int) -> void:
-	_xp_extra += amount * _bonus("xp_gain")  # Quick study: the fractions add up to whole points
+	_xp_extra += amount * (_bonus("xp_gain") + Tuning.XP_DROP_BONUS)  # Quick study: the fractions add up to whole points
 	var extra := int(_xp_extra)
 	_xp_extra -= extra
 	xp += amount + extra

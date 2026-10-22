@@ -150,7 +150,7 @@ func _run() -> void:
 	var pv: Dictionary = main.preview(42)
 	_check(hub.selected_seed == 42 and hub.preview_data["w"] == pv["w"] and hub.preview_data["extract"] == pv["extract"], "the table should show the selected map")
 	_check(hub._preview != null and hub._preview.get_child_count() >= pv["blocks"].size(), "the miniature should hold every wall and cover box")
-	_check(pv["spawners"].size() == Tuning.SPAWNER_COUNT and pv["rooms"] == 2, "the preview should list the bases and loot rooms")
+	_check(pv["spawners"].size() == Tuning.SPAWNER_COUNT and pv.has("buildings"), "the preview should list the bases and buildings")
 	hub._enter_seed("not a number")
 	_check(hub.selected_seed == 42, "a bad map number must be ignored")
 	hub._enter_seed("7")

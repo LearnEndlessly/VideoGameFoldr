@@ -50,10 +50,10 @@ func _walk(id: String, waypoints: Array, top: float) -> void:
 	var body := CharacterBody3D.new()
 	var cs := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
-	cap.radius = 0.4
-	cap.height = 1.8
+	cap.radius = 0.5  # the player's own default capsule (scripts/player.gd)
+	cap.height = 2.0
 	cs.shape = cap
-	cs.position.y = 0.9
+	cs.position.y = 1.0
 	body.add_child(cs)
 	body.position = waypoints[0] + Vector3(0, 0.05, 0)
 	holder.add_child(body)

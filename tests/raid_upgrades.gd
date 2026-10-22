@@ -72,7 +72,7 @@ func _run() -> void:
 	var player = main._player
 	_check(raid.upgrades.is_empty() and raid.picks_pending == 0, "a fresh raid has no upgrades")
 	_check(not raid.choose_upgrade("damage"), "no pick is pending, so nothing is bought")
-	raid.add_xp(Upgrades.RAID_XP_BASE - 1)
+	raid.xp = Upgrades.RAID_XP_BASE - 1  # set directly: add_xp adds Tuning.XP_DROP_BONUS on top
 	_check(raid.picks_pending == 0, "one xp short of a level earns nothing")
 	raid.add_xp(1)
 	_check(raid.picks_pending == 1, "%d xp should earn a pick, got %d" % [Upgrades.RAID_XP_BASE, raid.picks_pending])

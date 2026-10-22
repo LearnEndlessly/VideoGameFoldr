@@ -308,9 +308,10 @@ func _run() -> void:
 
 	prof.stat_override = {"xp_gain": 0.3}
 	raid.xp = 0
-	for i in 9:
+	for i in 7:  # 7 keeps it under one level (RAID_XP_BASE) with the flat XP_DROP_BONUS added
 		raid.add_xp(1)
-	_check(raid.xp == 11, "Quick study 5: 9 orbs give 11 xp, got %d" % raid.xp)
+	var want := 7 + int(7 * (0.3 + Tuning.XP_DROP_BONUS))
+	_check(raid.xp == want, "Quick study 5: 7 orbs give %d xp, got %d" % [want, raid.xp])
 
 	prof.stat_override = {"extract_speed": 0.25}
 	_check(is_equal_approx(raid.hold_seconds_for("A"), raid.hold_seconds * 0.75) and is_equal_approx(raid.hold_seconds_for("B"), raid.hold_seconds * 0.75 * raid.b_hold_seconds / Tuning.EXTRACT_HOLD_SECONDS), "Quick exit 5: 25%% shorter holds")
