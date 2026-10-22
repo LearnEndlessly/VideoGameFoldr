@@ -55,14 +55,22 @@ static func _synthesize(def: Dictionary) -> AudioStreamWAV:
 	rng.seed = 1  # same noise every run
 	var phase := 0.0
 	var noise_mix: float = def["noise"]
+	var lowpass: float = def.get("noise_lowpass", 0.0)
+	var click: float = def.get("click", 0.0)
+	var click_len := int(0.006 * RATE)
+	var soft := 0.0  # the noise after the one-pole low-pass
 	for i in n:
 		var t := float(i) / n
-		phase += TAU * lerpf(def["freq"], def["freq_end"], t) / RATE
+		var freq: float = lerpf(def["freq"], def["freq_end"], t) + sin(TAU * float(def.get("wobble", 0.0)) * float(i) / RATE) * float(def.get("wobble_depth", 0.0))
+		phase += TAU * freq / RATE
 		var tone := sin(phase)
 		if def["wave"] == "square":
 			tone = signf(tone)
 		var env := pow(1.0 - t, float(def["decay"])) * minf(1.0, t * 200.0)  # short fade-in avoids a click
-		var s: float = (tone * (1.0 - noise_mix) + rng.randf_range(-1.0, 1.0) * noise_mix) * env * float(def["volume"])
+		soft = lerpf(rng.randf_range(-1.0, 1.0), soft, lowpass)
+		var s: float = (tone * (1.0 - noise_mix) + soft * (1.0 + lowpass * 1.5) * noise_mix) * env * float(def["volume"])
+		if i < click_len:
+			s += rng.randf_range(-1.0, 1.0) * click * (1.0 - float(i) / click_len) * float(def["volume"]) * 2.0
 		bytes.encode_s16(i * 2, int(clampf(s, -1.0, 1.0) * 32767.0))
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS

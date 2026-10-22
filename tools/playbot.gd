@@ -63,19 +63,20 @@ func _init() -> void:
 		"waypoints_left": _waypoints.size(), "safe": player.safe}))
 	quit()
 
-# Waypoints: for each loot zone (nearest first) the door, its crates, and back out; then the extract zone.
+# Waypoints: for each building (nearest first) its door, its ground-floor crates, and back out; then the extract zone.
+# The bot walks straight lines and cannot climb, so upstairs crates are left alone.
 func _plan() -> void:
-	var zones: Array = main.structures.duplicate()
-	zones.sort_custom(func(a, b): return a["center"].length() < b["center"].length())
-	for st in zones:
-		var out: Vector3 = (st["door"] - st["center"]).normalized()
-		_waypoints.append({"pos": st["door"] + out * 3.0})
-		_waypoints.append({"pos": st["door"] - out * 1.5})
+	var blds: Array = main.buildings.duplicate()
+	blds.sort_custom(func(a, b): return a["pos"].length() < b["pos"].length())
+	for b in blds:
+		var out: Vector3 = b["out"]
+		_waypoints.append({"pos": b["door"] + out * 3.0})
+		_waypoints.append({"pos": b["door"] - out * 1.5})
 		for c in main.get_children():
-			if c.is_in_group("lootable") and c.zone_id == st["id"]:
+			if c.is_in_group("lootable") and c.position.y < 1.0 and b["rect"].has_point(Vector2(c.position.x, c.position.z)):
 				_waypoints.append({"pos": c.global_position, "crate": c})
-		_waypoints.append({"pos": st["door"] - out * 1.5})
-		_waypoints.append({"pos": st["door"] + out * 3.0})
+		_waypoints.append({"pos": b["door"] - out * 1.5})
+		_waypoints.append({"pos": b["door"] + out * 3.0})
 	_waypoints.append({"pos": main.extract_pos, "extract": true})  # resolved to the nearer zone when the bot gets there
 
 # The extract zone nearest the bot right now: "A" (safe route) or "B" (fast route).

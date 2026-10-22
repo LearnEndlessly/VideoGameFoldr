@@ -45,46 +45,44 @@ func _run() -> void:
 	p.add_items({"ammo": 70, "medkit": 6})
 	_check(p.equip("scattergun") and p.equipped == "scattergun" and not p.equip("not_a_weapon"), "equip should accept real weapons only")
 
-	# Attribute points: an extract earns none (clearing rounds does, see tests/attributes.gd), they are spent one level at a time.
-	_check(not p.spend_point("speed"), "no points, no level")
+	# Skill points: an extract earns none (clearing rounds does, see tests/stat_hooks.gd); they are spent one node at a time.
+	_check(not p.allocate_node("S1"), "no points, no node")
 	p.record_extract()
-	_check(p.points == 0 and p.stats["extracts"] == 1, "an extract alone earns no attribute point, got %d" % p.points)
-	p.points = 3
-	_check(p.spend_point("speed") and p.spend_point("constitution") and p.spend_point("constitution") and p.points == 0, "three points, three levels")
-	_check(not p.spend_point("handling"), "spending needs a point")
-	_check(is_equal_approx(p.speed_mult(), 1.06) and p.max_health(100) == 120 and is_equal_approx(p.armor(), 0.08), "attribute effects were wrong")
-	p.points = 10
-	for i in 10:
-		p.spend_point("handling")
-	_check(p.attr_level("handling") == Upgrades.ATTR_LEVEL_MAX and p.points == 5, "an attribute stops at its max level")
-	_check(is_equal_approx(p.reload_mult(), 0.5), "5 levels of handling should halve reload time")
-	_check(not p.spend_point("not_an_attribute"), "unknown attribute must be refused")
+	_check(p.unspent_points == 0 and p.stats["extracts"] == 1, "an extract alone earns no skill point, got %d" % p.unspent_points)
+	p.unspent_points = 5
+	_check(p.allocate_node("S1") and p.allocate_node("S2") and p.allocate_node("S3") and p.allocate_node("D1") and p.allocate_node("D2") and p.unspent_points == 0, "five points, five nodes")
+	_check(not p.allocate_node("D3"), "spending needs a point")
+	_check(is_equal_approx(p.speed_mult(), 1.012) and p.max_health(100) == 112, "node effects were wrong")
+	_check(is_equal_approx(p.reload_mult(), 0.98), "two Dexterity nodes cut reload time by 2%")
+	p.unspent_points = 1
+	_check(not p.allocate_node("not_a_node") and not p.allocate_node("GB"), "unknown or unreachable nodes must be refused")
+	p.unspent_points = 0
 
 	# Save round trip, and a version 1 save (stash only) still loads.
 	_check(p.save(), "save failed")
 	var q := Profile.new(PATH)
 	q.load_from_disk()
-	_check(q.totals == p.totals and q.attrs == p.attrs and q.points == p.points \
-		and q.equipped == p.equipped and q.stats == p.stats, "reload differed: %s vs %s" % [var_to_str(q.attrs), var_to_str(p.attrs)])
+	_check(q.totals == p.totals and q.allocated_nodes == p.allocated_nodes and q.unspent_points == p.unspent_points \
+		and q.equipped == p.equipped and q.stats == p.stats, "reload differed: %s vs %s" % [var_to_str(q.allocated_nodes), var_to_str(p.allocated_nodes)])
 	var old := FileAccess.open(PATH, FileAccess.WRITE)
 	old.store_string('{"version": 1, "totals": {"ammo": 4}}')
 	old.close()
 	q.load_from_disk()
-	_check(q.totals == {"ammo": 4} and q.equipped == "pistol" and q.points == 0, "a version 1 save should load with defaults")
+	_check(q.totals == {"ammo": 4} and q.equipped == "pistol" and q.unspent_points == 0, "a version 1 save should load with defaults")
 
 	# Attributes carry into a raid: health, armor, speed and reload, and the starting weapon.
 	Main.show_start = false
 	var prof := Profile.new(PATH)
-	prof.attrs = {"constitution": 3, "speed": 2, "handling": 1}
+	prof.allocated_nodes = ["S1", "S2", "S3", "D1", "D2", "D3"]
 	prof.equipped = "scattergun"
 	prof.save()
 	var main = await _new_raid(1)
 	var player = main._player
-	_check(player.max_health == 130 and player.health == 130, "constitution 3 should give 130 max health, got %d" % player.max_health)
-	_check(is_equal_approx(player.speed_mult, 1.12) and player.weapon_id == "scattergun", "speed and the equipped weapon should apply")
+	_check(player.max_health == 112 and player.health == 112, "three Strength nodes should give 112 max health, got %d" % player.max_health)
+	_check(is_equal_approx(player.speed_mult, 1.018) and player.weapon_id == "scattergun", "speed and the equipped weapon should apply")
 	player.take_damage(100)
-	_check(player.health == 130 - 88, "armor 12%% should turn a 100 hit into 88, health was %d" % player.health)
-	_check(is_equal_approx(main.raid.reload_seconds, Tuning.RELOAD_SECONDS * 0.9), "handling 1 should cut reload by 10%")
+	_check(player.health == 12, "no armor node: a 100 hit takes 100, health was %d" % player.health)
+	_check(is_equal_approx(main.raid.reload_seconds, Tuning.RELOAD_SECONDS * 0.97), "three Dexterity nodes should cut reload by 3%")
 	player.set_physics_process(false)
 	player.select_weapon("pistol")
 	var e = _target(main)
@@ -109,7 +107,7 @@ func _run() -> void:
 	_check(results.size() == 1 and results[0]["points"] == 0, "an extract alone should earn no attribute points, results %s" % [results])
 	var after := Profile.new(PATH)
 	after.load_from_disk()
-	_check(after.points == 0 and after.stats["extracts"] == 1, "the extract should be saved, got %d points" % after.points)
+	_check(after.unspent_points == 0 and after.stats["extracts"] == 1, "the extract should be saved, got %d points" % after.unspent_points)
 	main.queue_free()
 	await process_frame
 
@@ -117,7 +115,7 @@ func _run() -> void:
 	_clean()
 	var seed_profile := Profile.new(PATH)
 	seed_profile.add_items({"ammo": 50, "medkit": 4})
-	seed_profile.points = 1
+	seed_profile.unspent_points = 1
 	seed_profile.save()
 	Main.show_start = true
 	main = load("res://main.tscn").instantiate()
@@ -133,11 +131,10 @@ func _run() -> void:
 	_check(hub.open_station == "armory" and hub._panel.visible and hub.player.inventory_open, "using a station should open its panel")
 	hub._equip("scattergun")
 	hub._on_station_used(get_nodes_in_group("station").filter(func(n): return n.get_meta("station_id") == "character")[0])
-	hub._spend("speed")
 	var saved := Profile.new(PATH)
 	saved.load_from_disk()
 	_check(saved.totals == {"ammo": 50, "medkit": 4}, "the stash should be untouched by visiting the armory, stash %s" % [saved.totals])
-	_check(saved.equipped == "scattergun" and saved.attr_level("speed") == 1 and saved.points == 0, "equip and attribute changes should be saved")
+	_check(saved.equipped == "scattergun" and saved.unspent_points == 1, "equip should be saved and the character station should spend nothing")
 	var started := [-1]
 	hub.start_raid = func(map_seed): started[0] = map_seed
 	hub._map_button("play")
@@ -153,7 +150,7 @@ func _run() -> void:
 	var pv: Dictionary = main.preview(42)
 	_check(hub.selected_seed == 42 and hub.preview_data["w"] == pv["w"] and hub.preview_data["extract"] == pv["extract"], "the table should show the selected map")
 	_check(hub._preview != null and hub._preview.get_child_count() >= pv["blocks"].size(), "the miniature should hold every wall and cover box")
-	_check(pv["spawners"].size() == Tuning.SPAWNER_COUNT and pv["rooms"] == 2, "the preview should list the bases and loot rooms")
+	_check(pv["spawners"].size() == Tuning.SPAWNER_COUNT and pv.has("buildings"), "the preview should list the bases and buildings")
 	hub._enter_seed("not a number")
 	_check(hub.selected_seed == 42, "a bad map number must be ignored")
 	hub._enter_seed("7")

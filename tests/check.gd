@@ -5,7 +5,6 @@ const Loot = preload("res://data/loot.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Inventory = preload("res://scripts/inventory.gd")
 const WeaponData = preload("res://data/weapons.gd")
-const LootZones = preload("res://data/loot_zones.gd")
 const Sounds = preload("res://data/sounds.gd")
 const Sfx = preload("res://scripts/sfx.gd")
 
@@ -40,12 +39,6 @@ func _init() -> void:
 		for i in range(0, s.data.size(), 2):
 			peak = maxi(peak, absi(s.data.decode_s16(i)))
 		assert(peak > 1000, "%s: sound is silent" % name)
-	for zone_id in LootZones.DATA:
-		var zone: Dictionary = LootZones.DATA[zone_id]
-		for item in zone["pool"]:
-			assert(Loot.ITEMS.has(item), "%s drops unknown item %s" % [zone_id, item])
-		for i in 200:
-			assert(zone["pool"].has(Loot.roll(a, zone["pool"], zone["qty_mult"])[0]), "%s rolled outside its pool" % zone_id)
 	assert(Loot.roll(a, {"medkit": 1}, 3.0) == ["medkit", 3], "pool and quantity multiplier must apply")
 	for weapon_id in WeaponData.DATA:
 		assert(Sounds.DATA.has(WeaponData.DATA[weapon_id]["sound"]), "weapon %s has no sound" % weapon_id)

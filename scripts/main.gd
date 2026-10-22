@@ -11,7 +11,7 @@ const WeaponData = preload("res://data/weapons.gd")
 const Enemies = preload("res://data/enemies.gd")
 const Tuning = preload("res://data/tuning.gd")
 const Scenery = preload("res://data/scenery.gd")
-const LootZones = preload("res://data/loot_zones.gd")
+const Buildings = preload("res://data/buildings.gd")
 const Rng = preload("res://data/rng.gd")
 const InventoryUI = preload("res://scripts/inventory_ui.gd")
 const ItemIcon = preload("res://scripts/item_icon.gd")
@@ -71,8 +71,8 @@ var map_type := "open"  # "open" or "narrow" (Tuning.MAP_TYPES)
 var half_w := 30.0  # half the map width (x) and depth (z), set per raid
 var half_d := 30.0
 var towers: Array = []  # {"pos", "ladder", "top"} of each watch tower
-var structures: Array = []  # loot areas: {"id", "center", "rect": Rect2 on the XZ plane}
 var shelters: Array = []  # Vector3 centres of the safe nooks
+var buildings: Array = []  # walkable buildings: {"id", "pos", "rect": Rect2 on the XZ plane, "door": world point at the foot of the door, "out": unit vector out of the door}
 var blocks: Array = []  # [size, centre, colour] of every box added, for the base's map table
 var solids: Array = []  # Rect2 (x, z) of every solid box, for the layout test
 
@@ -84,7 +84,6 @@ var _last_tick := -1  # whole second of the extract timer last ticked
 var _gap := 3.0  # this map's minimum walkable gap between objects, rolled per map (Tuning.PATH_GAP_RANGE)
 var _taken: Array = []  # [centre, half_x, half_z] of everything placed, to keep walkable gaps
 var _cover: Array = []  # centres of placed cover boxes
-var _guard_pos = null  # Vector3 home of the group guarding Tuning.GUARDED_ZONE, or null
 var _player: Player
 var _spawners: Array = []  # the enemy bases (Spawner); each is freed when destroyed
 var _legacy_pad := Vector3.ZERO  # where the old single extract zone used to go; still kept clear (see _reserve_legacy_extract_pad)
@@ -153,11 +152,9 @@ func _build_map() -> void:
 	_taken.append([_start, 2.5, 2.5])  # player start
 	_reserve_legacy_extract_pad()
 	_place_gates()  # first on a narrow map, so everything else is placed around the walls
-	for id in LootZones.DATA:
-		_add_structure(id, LootZones.DATA[id])
+	_place_buildings()  # next, from its own RNG stream: loot only lives here, so they get the room before groups, bases and cover
 	for g in Tuning.ENEMY_GROUP_COUNT:
-		var guard = _guard_pos if g == 0 else null
-		var center: Vector3 = guard if guard != null else _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
+		var center: Vector3 = _free_spot(3.5, 3.5, Tuning.ENEMY_GROUP_MIN_ORIGIN)
 		for i in rng.randi_range(Tuning.ENEMY_GROUP_SIZE_MIN, Tuning.ENEMY_GROUP_SIZE_MAX):
 			var e := Enemy.new()
 			e.stats = Enemies.roll(rng)
@@ -168,6 +165,7 @@ func _build_map() -> void:
 			add_child(e)
 	for i in Tuning.SPAWNER_COUNT:
 		_place_spawner(i)
+		_garrison(_spawners.back())
 	_place_shelters()
 	_place_towers()
 	var mix := {}  # this map's own cover mix: each type's weight scaled by a random factor
@@ -241,7 +239,7 @@ func _build_raid() -> void:
 		if count >= 2:
 			_combo.show_paid("COMBO x%d  +%d" % [count, bonus]))
 	raid.point_earned.connect(func():
-		_banner.text = "NEW ATTRIBUTE POINT AT THE CHARACTER SCREEN\nRound %d cleared" % raid.round_number()
+		_banner.text = "NEW SKILL POINT AT THE CHARACTER STATION\nRound %d cleared" % raid.round_number()
 		_banner_time = 7.0
 		Sfx.play("pickup"))
 	raid.attachment_broke.connect(func(attachment_name: String):
@@ -678,6 +676,7 @@ func _add_depth_bases() -> void:
 			_place_spawner(_spawners.size())
 			var sp: Node3D = _spawners.back()
 			if extract_zones.all(func(z): return Vector2(z["pos"].x - sp.position.x, z["pos"].z - sp.position.z).length() >= Tuning.EXTRACT_MIN_BASE_DISTANCE):
+				_garrison(sp)
 				break
 			_spawners.pop_back()
 			sp.free()
@@ -695,7 +694,7 @@ func preview(map_seed: int) -> Dictionary:
 			groups[c.home] = true
 	var data := {"w": m.half_w * 2.0, "d": m.half_d * 2.0, "blocks": m.blocks, "extract": m.extract_pos, "extracts": m.extract_zones.map(func(z): return {"id": z["id"], "pos": z["pos"]}),
 		"spawners": m._spawners.map(func(sp): return sp.position), "groups": groups.keys(),
-		"rooms": m.structures.size(), "cover": m._cover.size(), "type": m.map_type}
+		"buildings": m.buildings.size(), "cover": m._cover.size(), "type": m.map_type}
 	m.free()
 	return data
 
@@ -728,9 +727,6 @@ func _set_safe(body: Node3D, value: bool) -> void:
 # The starting map as data, written to the first line of each raid's log (scripts/telemetry.gd).
 # Add anything new about the map here.
 func _map_info() -> Dictionary:
-	var zones: Array = []
-	for st in structures:
-		zones.append({"id": st["id"], "center": st["center"], "size": st["size"], "door": st["door"]})
 	var enemies: Array = []
 	var crates: Array = []
 	for c in get_children():
@@ -739,11 +735,18 @@ func _map_info() -> Dictionary:
 		elif c.is_in_group("lootable"):
 			crates.append({"zone": c.zone_id, "pos": c.position})
 	return {"type": map_type, "w": half_w * 2.0, "d": half_d * 2.0, "extract": extract_pos, "extracts": extract_zones.map(func(z): return z["pos"]), "shelters": shelters,
-		"zones": zones, "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
+		"buildings": buildings.map(func(b): return {"id": b["id"], "pos": b["pos"]}), "spawners": _spawners.map(func(sp): return sp.position), "enemies": enemies, "crates": crates}
 
-# An enemy base: a small footprint reserved like a group, far from the start. See scripts/spawner.gd.
+# An enemy base: a small footprint reserved like a group, far from the start and (when the map has room)
+# SPAWNER_MIN_SEPARATION m from every other base. See scripts/spawner.gd.
 func _place_spawner(index: int) -> void:
-	var pos: Vector3 = _free_spot(2.0, 2.0, Tuning.SPAWNER_MIN_ORIGIN)
+	var apart: float = Tuning.SPAWNER_NARROW_SEPARATION if map_type == "narrow" else Tuning.SPAWNER_MIN_SEPARATION
+	var pos := _base_spot()
+	for attempt in 30:
+		if _spawners.all(func(o): return Vector2(o.position.x - pos.x, o.position.z - pos.z).length() >= apart):
+			break
+		_taken.pop_back()  # _base_spot reserved this spot; give it back and draw another
+		pos = _base_spot()
 	var sp := Spawner.new()
 	sp.position = pos
 	sp.group_id = Tuning.ENEMY_GROUP_COUNT + index
@@ -752,14 +755,40 @@ func _place_spawner(index: int) -> void:
 	_spawners.append(sp)
 	solids.append(Rect2(Vector2(pos.x - 1.0, pos.z - 1.0), Vector2(2, 2)))
 
+# A spot for a base with the ground around it for its garrison kept clear of cover; a crowded map falls back to the bare
+# 2x2 footprint.
+func _base_spot() -> Vector3:
+	var half := Tuning.SPAWNER_CLUSTER_MAX + 1.0
+	var p = _free_spot(half, half, Tuning.SPAWNER_MIN_ORIGIN, false)
+	return p if p != null else _free_spot(2.0, 2.0, Tuning.SPAWNER_MIN_ORIGIN)
+
+# The base's starting defenders: a cluster standing SPAWNER_CLUSTER_MIN..MAX m around it, in the base's own group so
+# the base counts them toward its cap. Drawn from a stream of its own (the base's seed), never the map's.
+func _garrison(sp: Node3D) -> void:
+	var grng := RandomNumberGenerator.new()
+	grng.seed = sp.rng_seed + 1
+	for i in grng.randi_range(Tuning.SPAWNER_GARRISON_MIN, Tuning.SPAWNER_GARRISON_MAX):
+		var e := Enemy.new()
+		e.stats = Enemies.roll(grng)
+		e.home = sp.position
+		e.group_id = sp.group_id
+		e.patrol_radius = Tuning.SPAWNER_PATROL_RADIUS
+		for attempt in 30:  # not inside a wall, box or building: take the first of a few draws that is clear
+			var a := grng.randf() * TAU
+			e.position = sp.position + Vector3(cos(a), 0, sin(a)) * grng.randf_range(Tuning.SPAWNER_CLUSTER_MIN, Tuning.SPAWNER_CLUSTER_MAX)
+			if not solids.any(func(r): return r.grow(0.6).has_point(Vector2(e.position.x, e.position.z))):
+				break
+		add_child(e)
+
 # --- map generation -------------------------------------------------------------
 
-# Picks the map's width and depth: a fixed floor area split by a random aspect ratio,
+# Picks the map's width and depth: a floor area that grows with the number of enemy bases, split by a random aspect ratio,
 # so some maps are long and narrow, some wide, some near square.
 func _roll_map_size() -> void:
 	var aspect := exp(rng.randf_range(log(Tuning.MAP_ASPECT_MIN), log(Tuning.MAP_ASPECT_MAX)))
-	var w := clampf(sqrt(Tuning.MAP_AREA * aspect), Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
-	var d := clampf(Tuning.MAP_AREA / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	var area := maxf(Tuning.MAP_AREA, Tuning.MAP_AREA_PER_BASE * (Tuning.SPAWNER_COUNT + mini(depth * Tuning.DEPTH_EXTRA_SPAWNERS, Tuning.DEPTH_MAX_EXTRA_SPAWNERS)))  # more bases, bigger map
+	var w := clampf(sqrt(area * aspect), Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
+	var d := clampf(area / w, Tuning.MAP_MIN_SIDE, Tuning.MAP_MAX_SIDE)
 	half_w = roundf(w) / 2.0
 	half_d = roundf(d) / 2.0
 
@@ -813,6 +842,73 @@ func _place_towers() -> void:
 		if p != null:
 			_add_tower(p, rng.randi_range(0, 3))
 	rng = map_rng
+
+# Walkable buildings (data/buildings.gd): Buildings.COUNT of them, each a scene from scenes/buildings/. Drawn from a stream of
+# the map seed's own, like the towers, and a building with no clear spot is skipped. They go in right after the gates so there is room.
+func _place_buildings() -> void:
+	var brng := RandomNumberGenerator.new()
+	brng.seed = ("buildings:%d" % rng.seed).hash()
+	var map_rng := rng
+	rng = brng
+	var ids: Array = Buildings.DATA.keys()
+	var total := 0
+	for id in ids:
+		total += int(Buildings.DATA[id]["weight"])
+	var count: Array = Buildings.NARROW_COUNT if map_type == "narrow" else Buildings.COUNT
+	var want := rng.randi_range(count[0], count[1])
+	var placed := 0
+	for attempt in want * 3:  # a draw that finds no room does not count; loot only lives in buildings, so keep trying
+		if placed >= want:
+			break
+		var roll := rng.randi_range(1, total)
+		for id in ids:
+			roll -= int(Buildings.DATA[id]["weight"])
+			if roll <= 0:
+				placed += 1 if _add_building(id, Buildings.DATA[id]) else 0
+				break
+	if placed == 0:  # a map with no building has no loot at all: fall back to the smallest, then let the others try
+		var by_size: Array = ids.duplicate()
+		by_size.sort_custom(func(a, b): return Buildings.DATA[a]["size"][0] * Buildings.DATA[a]["size"][1] < Buildings.DATA[b]["size"][0] * Buildings.DATA[b]["size"][1])
+		for id in by_size:
+			if _add_building(id, Buildings.DATA[id]):
+				break
+	rng = map_rng
+
+# One building at a clear spot, turned a random quarter turn, then turned round if its door (local +z) would face the outer wall.
+# Its CrateSpots markers (tools/build_buildings.gd) give the floor spots; a random few get loot crates.
+func _add_building(id: String, def: Dictionary) -> bool:
+	var turn := rng.randi_range(0, 3)
+	var size := Vector2(def["size"][0], def["size"][1])
+	if turn % 2 == 1:
+		size = Vector2(size.y, size.x)
+	var p = _free_spot(size.x / 2.0, size.y / 2.0, 10.0, false)
+	if p == null:
+		return false
+	if Vector3(0, 0, 1).rotated(Vector3.UP, turn * PI / 2.0).dot(p) > 0.0:
+		turn = (turn + 2) % 4
+	var node: Node3D = (load(def["scene"]) as PackedScene).instantiate()
+	node.position = p
+	node.rotation.y = turn * PI / 2.0
+	add_child(node)
+	var rect := Rect2(Vector2(p.x - size.x / 2.0, p.z - size.y / 2.0), size)
+	solids.append(rect)
+	var door: Vector3 = node.transform * node.get_node("DoorSpot").position
+	buildings.append({"id": id, "pos": p, "rect": rect, "door": door, "out": Vector3(0, 0, 1).rotated(Vector3.UP, turn * PI / 2.0)})
+	var spots: Array = node.get_node("CrateSpots").get_children()
+	for i in range(spots.size() - 1, 0, -1):  # shuffled from the map's stream, not Array.shuffle's global one
+		var j := rng.randi_range(0, i)
+		var tmp = spots[i]
+		spots[i] = spots[j]
+		spots[j] = tmp
+	var crates: Array = def["crates"]
+	for m in spots.slice(0, mini(rng.randi_range(crates[0], crates[1]), spots.size())):
+		var c := Crate.new()
+		c.seed_value = rng.randi()
+		c.zone_id = Buildings.CRATE_ZONE_ID
+		c.color = Buildings.CRATE_COLOR
+		c.position = node.transform * (m.position + Vector3(0, 0.5, 0))
+		add_child(c)
+	return true
 
 # A deck on four legs with a rail on three sides and a ladder up the fourth (`ladder_side`, see _side_normal).
 func _add_tower(pos: Vector3, ladder_side: int) -> void:
@@ -880,21 +976,6 @@ func _free_spot(hx: float, hz: float, min_origin: float, overlap_ok := true):
 func _inside_map(p: Vector3, half: float) -> bool:
 	return absf(p.x) <= half_w - half - _gap and absf(p.z) <= half_d - half - _gap
 
-# Every spot GUARD_DISTANCE to GUARD_DISTANCE + 4 m from the door on `side` of the loot area
-# at `center`, within 70 degrees of straight out from the door, that is clear, inside the map
-# and at least ENEMY_GROUP_MIN_ORIGIN from the player's start. A grid, not random samples:
-# the valid region is often a thin sliver that 40 random tries missed.
-func _guard_spots(center: Vector3, size: float, side: int) -> Array:
-	var n := _side_normal(side)
-	var door := center + n * (size / 2.0)
-	var spots: Array = []
-	for a in 25:
-		for d in 5:
-			var p := door + n.rotated(Vector3.UP, -1.2 + a * 0.1) * (Tuning.GUARD_DISTANCE + d)
-			if (p - _start).length() >= Tuning.ENEMY_GROUP_MIN_ORIGIN and _inside_map(p, 3.5) and _is_clear(p, 3.5, 3.5):
-				spots.append(p)
-	return spots
-
 # Rolls a cover box and places it: at a random clear spot, or exactly at `at` if given
 # and clear. Skipped (nothing placed) when it doesn't fit with a walkable gap.
 func _place_cover(at = null, mix := {}) -> void:
@@ -950,88 +1031,6 @@ func _add_shelter(pos: Vector3, door_side: int) -> void:
 	area.body_exited.connect(_set_safe.bind(false))
 	add_child(area)
 
-# One of the loot areas: a walled compound with a door and crates inside that roll
-# from the area's own loot pool and quantity (data/loot_zones.gd).
-func _add_structure(id: String, zone: Dictionary) -> void:
-	var size: float = zone["size"]
-	var half := size / 2.0 + 0.3
-	var center: Vector3 = _free_spot(half, half, 10.0)
-	# The guarded area's door goes on a side that has room for the guard group outside it,
-	# and the guard spot is reserved now, before later areas, shelters and cover take it.
-	var door_side := -1
-	if id == Tuning.GUARDED_ZONE:
-		var first := rng.randi_range(0, 3)
-		for k in 4:
-			var spots := _guard_spots(center, size, (first + k) % 4)
-			if not spots.is_empty():
-				door_side = (first + k) % 4
-				_guard_pos = spots[rng.randi_range(0, spots.size() - 1)]
-				_taken.append([_guard_pos, 3.5, 3.5])
-				break
-	# Otherwise the door faces toward the middle of the map, never at a nearby outer wall.
-	if door_side < 0:
-		var door_sides: Array = []
-		for s in 4:
-			if _side_normal(s).dot(center.normalized()) < 0.0:
-				door_sides.append(s)
-		door_side = door_sides[rng.randi_range(0, door_sides.size() - 1)] if not door_sides.is_empty() else rng.randi_range(0, 3)
-	var door2_side := door_side ^ 1  # sides 0/1 and 2/3 are opposite walls: a second doorway straight across
-	var height: float = zone["height"]
-	_add_room(center, size, door_side, float(zone["door"]), height, 0.5, zone["wall_color"], door2_side)
-	_dress_building(center, size, height, zone, [door_side, door2_side])
-	var floor_mark := MeshInstance3D.new()
-	var fm := BoxMesh.new()
-	fm.size = Vector3(size - 1.0, 0.02, size - 1.0)
-	floor_mark.mesh = fm
-	floor_mark.position = center + Vector3(0, 0.011, 0)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = (zone["wall_color"] as Color).lerp(Color(0.3, 0.5, 0.3), 0.5)
-	floor_mark.material_override = mat
-	add_child(floor_mark)
-	var label := Label3D.new()
-	label.text = zone["name"]
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.font_size = 64
-	label.position = center + Vector3(0, height + 3.0, 0)
-	add_child(label)
-
-	# Crates: against the inside walls (never the door's wall) and apart from each other, so the middle
-	# and the doorway stay clear. A crate is 1 m wide and the walls are 0.5 m thick.
-	var door_point := center + _side_normal(door_side) * (size / 2.0)
-	var edge := size / 2.0 - 1.05
-	var entry := center + _side_normal(door_side) * (size / 2.0 - 1.0) + Vector3(0, 0.5, 0)  # 1 m inside the doorway
-	var entry2 := center + _side_normal(door2_side) * (size / 2.0 - 1.0) + Vector3(0, 0.5, 0)
-	var spots: Array = []
-	var crate_range: Array = zone["crates"]
-	for round in 10:  # a first crate can leave no room for the next one in a small room: start over
-		spots = []
-		for i in rng.randi_range(crate_range[0], crate_range[1]):
-			for attempt in 40:
-				var side := rng.randi_range(0, 3)
-				if side == door_side or side == door2_side:
-					continue
-				var along := Vector3(1, 0, 0) if side < 2 else Vector3(0, 0, 1)
-				var p := center + _side_normal(side) * edge + along * rng.randf_range(-edge, edge) + Vector3(0, 0.5, 0)
-				if p.distance_to(entry) < 1.3 or p.distance_to(entry2) < 1.3:  # keep the ways in clear
-					continue
-				if spots.all(func(s): return p.distance_to(s) >= 1.2):
-					spots.append(p)
-					break
-		if spots.size() >= int(crate_range[0]):
-			break
-	for p in spots:
-		var c := Crate.new()
-		c.seed_value = rng.randi()
-		c.zone_id = id
-		c.pool = zone["pool"]
-		c.qty_mult = zone["qty_mult"]
-		c.rolls = zone["rolls"]
-		c.color = zone["crate_color"]
-		c.position = p
-		add_child(c)
-	structures.append({"id": id, "center": center, "size": size, "door": door_point, "door2": center + _side_normal(door2_side) * (size / 2.0),
-		"rect": Rect2(Vector2(center.x - size / 2.0, center.z - size / 2.0), Vector2(size, size))})
-
 # Sides: 0 = +z, 1 = -z, 2 = +x, 3 = -x.
 func _side_normal(side: int) -> Vector3:
 	return [Vector3(0, 0, 1), Vector3(0, 0, -1), Vector3(1, 0, 0), Vector3(-1, 0, 0)][side]
@@ -1051,56 +1050,6 @@ func _add_room(center: Vector3, outer: float, door_side: int, door_w: float,
 			var size := Vector3(length, height, thick) if side < 2 else Vector3(thick, height, length)
 			var pos := center + n * (outer / 2.0 - thick / 2.0) + along * mid + Vector3(0, height / 2.0, 0)
 			_add_box(size, pos, color, WALL_MODEL)
-
-# Looks only, no collision and not in `blocks` or `solids` (so the walk grid and the base map ignore them): a
-# roof, a band of trim under it (a lintel over each doorway), and what says what the building is. The armory
-# is olive with yellow trim, corner merlons on the roof and rows of rounds painted on its walls; the med post
-# is white with green trim, a red cross on its walls and a big red cross standing on the roof.
-func _dress_building(center: Vector3, size: float, height: float, zone: Dictionary, doors: Array) -> void:
-	var roof_y := height + 0.175
-	_deco(Vector3(size + 0.8, 0.35, size + 0.8), center + Vector3(0, roof_y, 0), zone["roof_color"], FLOOR_MODEL)
-	for side in 4:
-		var n := _side_normal(side)
-		var wall_pos := center + n * (size / 2.0 + 0.04)
-		_deco(Vector3(size + 0.1, 0.45, 0.1) if side < 2 else Vector3(0.1, 0.45, size + 0.1), wall_pos + Vector3(0, height - 0.5, 0), zone["trim_color"])
-		if side in doors:
-			continue  # the doorway is in the middle of this wall
-		var face := wall_pos + n * 0.02 + Vector3(0, height * 0.5, 0)
-		var thin := 0.08
-		if zone["style"] == "medical":
-			var red := Color(0.85, 0.12, 0.12)
-			_deco(Vector3(0.5, 1.6, thin) if side < 2 else Vector3(thin, 1.6, 0.5), face, red)
-			_deco(Vector3(1.6, 0.5, thin) if side < 2 else Vector3(thin, 0.5, 1.6), face, red)
-		else:
-			for k in [-0.7, 0.0, 0.7]:  # three rounds: brass body, copper tip
-				var off := Vector3(k, 0, 0) if side < 2 else Vector3(0, 0, k)
-				_deco(Vector3(0.4, 1.3, thin) if side < 2 else Vector3(thin, 1.3, 0.4), face + off - Vector3(0, 0.2, 0), zone["trim_color"])
-				_deco(Vector3(0.4, 0.35, thin) if side < 2 else Vector3(thin, 0.35, 0.4), face + off + Vector3(0, 0.62, 0), Color(0.75, 0.4, 0.15))
-	if zone["style"] == "medical":
-		var up := Vector3(0, height + 0.35 + 1.1, 0)
-		for dims in [Vector3(0.6, 2.2, 0.6), Vector3(2.2, 0.6, 0.6), Vector3(0.6, 0.6, 2.2)]:
-			_deco(dims, center + up, Color(0.85, 0.12, 0.12))
-	else:
-		for sx in [-1, 1]:
-			for sz in [-1, 1]:
-				_deco(Vector3(0.9, 0.6, 0.9), center + Vector3(sx, 0, sz) * (size / 2.0 + 0.2) + Vector3(0, height + 0.35 + 0.3, 0), zone["roof_color"])
-
-func _deco(size: Vector3, pos: Vector3, color: Color, model := "") -> void:
-	if model != "":
-		var fitted := Model.load_fitted(model, size, color)
-		if fitted != null:
-			fitted.position = pos
-			add_child(fitted)
-			return
-	var mesh := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mesh.mesh = bm
-	mesh.position = pos
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mesh.material_override = mat
-	add_child(mesh)
 
 # The old single extract zone sat at one end of the map's long axis. The zones are now placed by
 # _place_extracts, but this still makes the same two draws from the map's rng and keeps the same footprint

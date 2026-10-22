@@ -86,7 +86,7 @@ func _run() -> void:
 	main = _raid(4)
 	await process_frame
 	raid = main.raid
-	_check(main._cover.size() == base_cover, "descending must not change the map underneath")
+	_check(main._cover.size() >= base_cover, "descending gives a map at least as big (more bases, more room), never a smaller one")
 	_check(main._spawners.size() == base_bases + 2 * Tuning.DEPTH_EXTRA_SPAWNERS, "two levels down should add %d bases, got %d vs %d" % [2 * Tuning.DEPTH_EXTRA_SPAWNERS, main._spawners.size(), base_bases])
 	_check(main._spawners[0].interval < base_interval, "bases should spawn faster")
 	_check(raid.start_ammo == base_ammo + 2 * Tuning.DEPTH_AMMO_BONUS and raid.drop_mult > 1.0, "more ammo should be available")

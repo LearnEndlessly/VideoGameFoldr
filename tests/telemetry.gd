@@ -7,7 +7,7 @@ const Main = preload("res://scripts/main.gd")
 const Telemetry = preload("res://scripts/telemetry.gd")
 const DIR := "user://telemetry_test"  # a scratch folder: the real logs are never touched
 const VERBS := ["start", "end", "enter", "leave", "open", "fire", "kill", "hit", "alert", "use", "drop", "switch", "toggle", "begin", "cancel", "sample", "die"]
-const OBJECTS := ["raid", "zone", "crate", "weapon", "enemy", "group", "item", "backpack", "extract", "clock", "state"]
+const OBJECTS := ["raid", "zone", "crate", "weapon", "enemy", "group", "item", "backpack", "extract", "clock", "state", "player"]
 const SUBJECTS := ["player", "enemy", "raid"]
 
 var failures: PackedStringArray = []
@@ -70,9 +70,9 @@ func _run() -> void:
 
 	var main = await _new_raid(11)
 	var player = main._player
-	var crate = main.get_children().filter(func(c): return c.is_in_group("lootable") and c.zone_id == "med_post")[0]
+	var crate = main.get_children().filter(func(c): return c.is_in_group("lootable"))[0]
 	player.global_position = crate.global_position
-	_check(main.raid.request_loot(crate), "the med post crate should be lootable")
+	_check(main.raid.request_loot(crate), "a building crate should be lootable")
 	player.global_position = Vector3.ZERO
 	await _frames(3)
 	var aim: Transform3D = player._cam.global_transform
@@ -108,7 +108,7 @@ func _run() -> void:
 	if events.size() > 0:
 		var first: Dictionary = events[0]
 		var map: Dictionary = first.get("map", {})
-		_check(map.get("zones", []).size() == 2, "map should list 2 loot zones")
+		_check(map.has("buildings"), "map should list the buildings")
 		_check(map.get("crates", []).size() >= 4, "map should list the crates")
 		_check(map.get("enemies", []).size() > 0, "map should list the enemies")
 		_check(map.get("extract", []).size() == 2 and map.get("shelters", []).size() > 0, "map should list the extract zone and shelters")
@@ -129,7 +129,7 @@ func _run() -> void:
 			_check(e["pos"].size() == 2 and e.has("hp") and e.has("pack") and e.has("near"), "sample is missing fields")
 		if e["ev"] == "player.open.crate":
 			crate_events += 1
-			_check(e.get("zone") == "med_post" and e.get("pos", []).size() == 2, "crate event should carry the zone and position")
+			_check(e.get("zone") == "building" and e.get("pos", []).size() == 2, "crate event should carry the zone and position")
 		if e["ev"] == "player.fire.weapon":
 			fired += 1 if e["outcome"] == "fired" else 0
 			dry += 1 if e["outcome"] == "dry" else 0

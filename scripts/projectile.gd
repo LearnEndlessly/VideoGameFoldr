@@ -11,6 +11,7 @@ var direction := Vector3.FORWARD
 var speed := 7.0
 var damage := 10
 var radius := 0.4
+var color := Color(1.0, 0.45, 0.05)
 var _age := 0.0
 
 func _ready() -> void:
@@ -28,17 +29,18 @@ func _ready() -> void:
 	sm.height = radius * 2.0
 	mesh.mesh = sm
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.45, 0.05)
+	mat.albedo_color = color
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.35, 0.0)
+	mat.emission = color
 	mat.emission_energy_multiplier = 3.0
 	mesh.material_override = mat
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mesh)
-	var glow := OmniLight3D.new()
-	glow.light_color = Color(1.0, 0.45, 0.1)
-	glow.omni_range = 4.0
-	add_child(glow)
+	if radius >= 0.3:  # the small volley shots glow through their material only: a light each would be too many
+		var glow := OmniLight3D.new()
+		glow.light_color = color
+		glow.omni_range = 4.0
+		add_child(glow)
 	body_entered.connect(_on_body)
 
 func _physics_process(delta: float) -> void:

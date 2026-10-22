@@ -23,8 +23,8 @@ The output folder (`%TEMP%\videogame-capture` by default) is cleared at the star
 |---|---|
 | 01_spawn | the first-person start view and HUD |
 | 02_overview | top-down view of the whole map: layout, zones, enemies, shelters |
-| 03_armory_outside, 04_armory_inside | the guarded loot area from the door and from inside |
-| 05_guard_group | the enemy group beside the armory |
+| 03_building_outside, 04_building_inside | the first building from outside its door and from just inside |
+| 05_guard_group | the first enemy group |
 | 06_shelter_from_9m, 07_shelter_from_4m | whether shelters are hidden |
 | 08_backpack | the inventory panel |
 | 09_aim_and_healthbar | aim line, enemy health bars and labels after a shot |

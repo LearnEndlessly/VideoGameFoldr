@@ -22,7 +22,7 @@ const VIEW_POS := Vector3(0.22, -0.2, -0.5)  # where the weapon model is held, i
 const ZOOM_FOV_SPEED := 500.0  # degrees per second the field of view moves toward its target
 
 var health := MAX_HEALTH
-var max_health := MAX_HEALTH  # raised by the Constitution attribute (apply_profile)
+var max_health := MAX_HEALTH  # raised by the skill tree (apply_profile)
 var armor := 0.0  # fraction of every hit absorbed
 var speed_mult := 1.0
 var gravity_mult := 1.0  # the Moon boots upgrade lowers it
@@ -32,6 +32,7 @@ var stealth := 0.0
 var dodge := 0.0
 var last_stand := 0.0
 var heal_mult := 1.0
+var loot_reach := 0.0  # extra metres E reaches (the skill tree)
 var ladder  # the ladder (scripts/ladder.gd) the player stands at, or null
 var kills := 0
 var safe := false  # true inside a shelter: enemies cannot see or hurt the player
@@ -147,7 +148,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if raid.request_reload():
 				Sfx.play("switch")
 		elif event.keycode == KEY_E:
-			var hit := _cast(3.0)
+			var hit := _cast(3.0 + loot_reach)
 			if hit and raid != null and hit["collider"].is_in_group("lootable"):
 				raid.request_loot(hit["collider"])
 			elif raid == null:
@@ -178,6 +179,7 @@ func apply_profile(profile) -> void:
 	dodge = profile.bonus("dodge")
 	last_stand = profile.bonus("last_stand")
 	heal_mult = 1.0 + profile.bonus("heal_mult")
+	loot_reach = profile.bonus("loot_reach")
 	loadout = [profile.equipped]
 	select_weapon(profile.equipped)
 
@@ -210,7 +212,7 @@ func _physics_process(delta: float) -> void:
 		_step_dist += Vector2(velocity.x, velocity.z).length() * delta
 		if _step_dist >= Tuning.PLAYER_STRIDE:
 			_step_dist = 0.0
-			Sfx.play("step_player")
+			Sfx.play("step_player", null, randf_range(0.88, 1.12))  # a little different each step
 
 	if raid != null and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 			and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):

@@ -36,10 +36,9 @@ func _clean() -> void:
 	for p in [PATH, PATH + ".tmp", PATH + ".bad"]:
 		DirAccess.remove_absolute(p)
 
-func _raid(attrs := {}) -> Node:
+func _raid() -> Node:
 	_clean()
 	var prof := Profile.new(PATH)
-	prof.attrs = attrs
 	prof.save()
 	Main.show_start = false
 	var main = load("res://main.tscn").instantiate()
@@ -110,12 +109,12 @@ func _run() -> void:
 	_check(raid.combo == 1, "after the reset a kill starts a new combo of 1")
 
 	# Adrenaline lengthens it, Showboat pays more.
-	main.profile.attrs = {"adrenaline": 5, "showboat": 5}
+	main.profile.stat_override = {"combo_time": 0.5, "combo_score": 0.5}
 	_check(is_equal_approx(raid.combo_window(3), (Tuning.COMBO_WINDOW - 2.0 * Tuning.COMBO_WINDOW_SHRINK) * 1.5), "Adrenaline 5: 50%% longer combos, got %s" % raid.combo_window(3))
 	raid.combo = 3
 	raid.combo_points = 900
 	_check(raid.combo_payout() == int(round(900 * 1.5 * 1.5)), "Showboat 5: 50%% more combo score, got %d" % raid.combo_payout())
-	main.profile.attrs = {}
+	main.profile.stat_override = {}
 
 	# The raid ending pays the running combo and reports it.
 	raid.combo = 2

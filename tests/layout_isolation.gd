@@ -67,7 +67,7 @@ func _fingerprint(s: int, cfg: Dictionary) -> String:
 	info.erase("extracts")
 	info["enemies"] = main.get_children().filter(func(n): return "stats" in n).map(
 		func(n): return [n.stats["type"], n.stats["modifier"], n.group_id, n.home, n.position])
-	var text := var_to_str(info) + var_to_str(main.solids) + var_to_str(main.blocks) + var_to_str(main.structures)
+	var text := var_to_str(info) + var_to_str(main.solids) + var_to_str(main.blocks)
 	main.queue_free()
 	await process_frame
 	return text.md5_text()

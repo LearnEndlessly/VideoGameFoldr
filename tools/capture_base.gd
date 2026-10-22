@@ -27,7 +27,7 @@ func _init() -> void:
 	Telemetry.enabled = false
 	var p := Profile.new(PATH)
 	p.add_items({"ammo": 64, "medkit": 5})
-	p.points = 2
+	p.unspent_points = 2
 	p.stats = {"runs": 6, "extracts": 4, "deaths": 2, "kills": 37, "shots": 212, "hits": 96, "deepest": 3}
 	p.save()
 	Main.show_start = true

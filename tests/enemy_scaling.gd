@@ -96,7 +96,8 @@ func _run() -> void:
 	_check(raid.xp == 0, "orbs give nothing until they are picked up")
 	for o in orbs:
 		raid.collect_xp(o)
-	_check(raid.xp == Enemies.xp_value(_stats("brute")) and is_equal_approx(raid.xp_fraction(), float(raid.xp) / raid.xp_needed()), "collecting orbs should fill the bar")
+	var orb_xp: int = Enemies.xp_value(_stats("brute"))
+	_check(raid.xp == orb_xp + int(orb_xp * Tuning.XP_DROP_BONUS) and is_equal_approx(raid.xp_fraction(), float(raid.xp) / raid.xp_needed()), "collecting orbs should fill the bar")
 	# A walk-in collects it too, and orbs drift toward the player.
 	var orb := preload("res://scripts/xp_orb.gd").new()
 	orb.position = player.global_position + Vector3(2.5, 0, 0)
@@ -104,8 +105,10 @@ func _run() -> void:
 	await _frames(40)
 	_check(not is_instance_valid(orb) or orb.is_queued_for_deletion() or orb.global_position.distance_to(player.global_position) < 2.0, "an orb should drift toward the player")
 	raid.xp = 0
-	raid.add_xp(raid.xp_needed())
-	_check(raid.picks_pending == 1 and raid.xp == 0, "a full bar earns a pick")
+	raid._xp_extra = 0.0
+	var need: int = raid.xp_needed()  # the next level needs more, so read it before
+	raid.add_xp(need)
+	_check(raid.picks_pending == 1 and raid.xp == int(need * Tuning.XP_DROP_BONUS), "a full bar earns a pick, and the XP_DROP_BONUS left over carries on")
 	_check(raid.xp_needed() == Upgrades.RAID_XP_BASE + Upgrades.RAID_XP_GROWTH, "the next level needs %d more xp" % Upgrades.RAID_XP_GROWTH)
 	main.queue_free()
 	await process_frame
